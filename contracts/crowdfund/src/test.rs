@@ -1895,3 +1895,227 @@ fn test_add_stretch_goal_by_non_creator_panics() {
 
     client.add_stretch_goal(&2_000_000);
 }
+
+// ── Overflow Protection Tests ──────────────────────────────────────────────
+
+#[test]
+fn test_contribution_near_i128_max_handled_gracefully() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 3600;
+    let goal: i128 = i128::MAX / 2;
+    let min_contribution: i128 = 1_000;
+    client.initialize(
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &None,
+    );
+
+    let contributor = Address::generate(&env);
+    // Mint a very large amount near i128::MAX
+    let large_amount = i128::MAX / 2;
+    mint_to(&env, &token_address, &admin, &contributor, large_amount);
+
+    // This should succeed without overflow
+    client.contribute(&contributor, &large_amount);
+
+    assert_eq!(client.total_raised(), large_amount);
+    assert_eq!(client.contribution(&contributor), large_amount);
+}
+
+#[test]
+fn test_multiple_contributions_causing_overflow_rejected() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 3600;
+    let goal: i128 = i128::MAX;
+    let min_contribution: i128 = 1_000;
+    client.initialize(
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &None,
+    );
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    
+    // First contribution: near max
+    let first_amount = i128::MAX - 1_000_000;
+    mint_to(&env, &token_address, &admin, &alice, first_amount);
+    client.contribute(&alice, &first_amount);
+
+    assert_eq!(client.total_raised(), first_amount);
+
+    // Second contribution: would cause overflow
+    let second_amount = 2_000_000;
+    mint_to(&env, &token_address, &admin, &bob, second_amount);
+    
+    let result = client.try_contribute(&bob, &second_amount);
+    
+    // Should fail with Overflow error
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err().unwrap(), crate::ContractError::Overflow);
+    
+    // Total should remain unchanged
+    assert_eq!(client.total_raised(), first_amount);
+    // Bob's contribution should not be recorded
+    assert_eq!(client.contribution(&bob), 0);
+}
+
+#[test]
+fn test_single_contributor_overflow_on_second_contribution() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 3600;
+    let goal: i128 = i128::MAX;
+    let min_contribution: i128 = 1_000;
+    client.initialize(
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &None,
+    );
+
+    let contributor = Address::generate(&env);
+    
+    // First contribution
+    let first_amount = i128::MAX - 500_000;
+    mint_to(&env, &token_address, &admin, &contributor, first_amount);
+    client.contribute(&contributor, &first_amount);
+
+    assert_eq!(client.contribution(&contributor), first_amount);
+
+    // Second contribution from same contributor would overflow their personal total
+    let second_amount = 1_000_000;
+    mint_to(&env, &token_address, &admin, &contributor, second_amount);
+    
+    let result = client.try_contribute(&contributor, &second_amount);
+    
+    // Should fail with Overflow error
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err().unwrap(), crate::ContractError::Overflow);
+    
+    // Contributor's total should remain unchanged
+    assert_eq!(client.contribution(&contributor), first_amount);
+}
+
+#[test]
+fn test_overflow_protection_preserves_contract_state() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 3600;
+    let goal: i128 = 1_000_000;
+    let min_contribution: i128 = 1_000;
+    client.initialize(
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &None,
+    );
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let charlie = Address::generate(&env);
+    
+    // Alice contributes successfully
+    mint_to(&env, &token_address, &admin, &alice, 300_000);
+    client.contribute(&alice, &300_000);
+
+    // Bob tries to contribute an amount that would overflow
+    let overflow_amount = i128::MAX;
+    mint_to(&env, &token_address, &admin, &bob, overflow_amount);
+    let result = client.try_contribute(&bob, &overflow_amount);
+    assert!(result.is_err());
+
+    // Verify contract state is preserved after overflow attempt
+    assert_eq!(client.total_raised(), 300_000);
+    assert_eq!(client.contribution(&alice), 300_000);
+    assert_eq!(client.contribution(&bob), 0);
+
+    // Charlie can still contribute successfully
+    mint_to(&env, &token_address, &admin, &charlie, 200_000);
+    client.contribute(&charlie, &200_000);
+
+    assert_eq!(client.total_raised(), 500_000);
+    assert_eq!(client.contribution(&charlie), 200_000);
+}
+
+#[test]
+fn test_exact_i128_max_contribution_accepted() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 3600;
+    let goal: i128 = i128::MAX;
+    let min_contribution: i128 = 1_000;
+    client.initialize(
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &None,
+    );
+
+    let contributor = Address::generate(&env);
+    // Mint exactly i128::MAX
+    mint_to(&env, &token_address, &admin, &contributor, i128::MAX);
+
+    // This should succeed - no overflow when adding to 0
+    client.contribute(&contributor, &i128::MAX);
+
+    assert_eq!(client.total_raised(), i128::MAX);
+    assert_eq!(client.contribution(&contributor), i128::MAX);
+}
+
+#[test]
+fn test_overflow_on_total_raised_not_individual_contribution() {
+    let (env, client, creator, token_address, admin) = setup_env();
+
+    let deadline = env.ledger().timestamp() + 3600;
+    let goal: i128 = i128::MAX;
+    let min_contribution: i128 = 1_000;
+    client.initialize(
+        &creator,
+        &token_address,
+        &goal,
+        &deadline,
+        &min_contribution,
+        &None,
+    );
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    
+    // Alice contributes a large amount
+    let alice_amount = i128::MAX / 2 + 1;
+    mint_to(&env, &token_address, &admin, &alice, alice_amount);
+    client.contribute(&alice, &alice_amount);
+
+    // Bob tries to contribute an amount that would overflow the total
+    // but not his individual contribution
+    let bob_amount = i128::MAX / 2 + 1;
+    mint_to(&env, &token_address, &admin, &bob, bob_amount);
+    
+    let result = client.try_contribute(&bob, &bob_amount);
+    
+    // Should fail with Overflow error on total_raised
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err().unwrap(), crate::ContractError::Overflow);
+    
+    // Alice's contribution should remain
+    assert_eq!(client.contribution(&alice), alice_amount);
+    // Bob's contribution should not be recorded
+    assert_eq!(client.contribution(&bob), 0);
+    // Total should only reflect Alice's contribution
+    assert_eq!(client.total_raised(), alice_amount);
+}

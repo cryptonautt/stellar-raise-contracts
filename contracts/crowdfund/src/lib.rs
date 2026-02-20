@@ -235,6 +235,7 @@ pub enum ContractError {
     /// Returned by `contribute` when `amount` is negative.
     NegativeAmount = 16,
     NegativeAmount = 11,
+    Overflow = 6,
 }
 
 /// Interface for an external NFT contract used to mint contributor rewards.
@@ -482,6 +483,56 @@ impl CrowdfundContract {
             {
                 panic!("state size limit exceeded");
             }
+        let token_address: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let token_client = token::Client::new(&env, &token_address);
+
+        // Transfer tokens from the contributor to this contract.
+        token_client.transfer(&contributor, &env.current_contract_address(), &amount);
+
+        // Update the contributor's running total with overflow protection.
+        let contribution_key = DataKey::Contribution(contributor.clone());
+        let prev: i128 = env
+            .storage()
+            .persistent()
+            .get(&contribution_key)
+            .unwrap_or(0);
+        
+        let new_contribution = prev
+            .checked_add(amount)
+            .ok_or(ContractError::Overflow)?;
+        
+        env.storage()
+            .persistent()
+            .set(&contribution_key, &new_contribution);
+        env.storage()
+            .persistent()
+            .extend_ttl(&contribution_key, 100, 100);
+
+        // Update the global total raised with overflow protection.
+        let total: i128 = env.storage().instance().get(&DataKey::TotalRaised).unwrap();
+        
+        let new_total = total
+            .checked_add(amount)
+            .ok_or(ContractError::Overflow)?;
+        
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalRaised, &new_total);
+
+        // Track contributor address if new.
+        let mut contributors: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Contributors)
+            .unwrap();
+        if !contributors.contains(&contributor) {
+            contributors.push_back(contributor.clone());
+            env.storage()
+                .persistent()
+                .set(&DataKey::Contributors, &contributors);
+            env.storage()
+                .persistent()
+                .extend_ttl(&DataKey::Contributors, 100, 100);
         }
 
         // Update the pledger's running total.
