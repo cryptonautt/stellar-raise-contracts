@@ -595,6 +595,8 @@ use soroban_sdk::contracterror;
     GovernanceAddress,
     /// Boolean flag — when true, contribute() and withdraw() are blocked.
     Paused,
+    /// Maximum amount any single address can contribute (optional).
+    MaxIndividualContribution,
 }
 
 // ── Contract Error ──────────────────────────────────────────────────────────
@@ -669,6 +671,7 @@ pub enum ContractError {
     NothingToRefund = 7,
     /// Returned when the campaign goal is below the minimum allowed threshold.
     GoalTooLow = 8,
+    IndividualLimitExceeded = 6,
 }
 
 #[derive(Clone, PartialEq)]
@@ -796,6 +799,13 @@ impl CrowdfundContract {
     ///
     /// The `creator.require_auth()` call ensures that only the authorized entity
     /// (whether a single user or a multisig group) can initialize the campaign.
+    /// * `creator`                     – The campaign creator's address.
+    /// * `token`                       – The token contract address used for contributions.
+    /// * `goal`                        – The funding goal (in the token's smallest unit).
+    /// * `deadline`                    – The campaign deadline as a ledger timestamp.
+    /// * `min_contribution`            – The minimum contribution amount.
+    /// * `max_individual_contribution` – Optional maximum amount any single address can contribute.
+    /// * `platform_config`             – Optional platform configuration (address and fee in basis points).
     ///
     /// # Panics
     /// * If already initialized.
@@ -836,6 +846,8 @@ impl CrowdfundContract {
     /// * [`ContractError::DeadlineTooSoon`]       – `deadline < now + 60`.
     /// * [`ContractError::InvalidPlatformFee`]    – `fee_bps > 10_000`.
     /// * [`ContractError::InvalidBonusGoal`]      – `bonus_goal <= goal`.
+    /// * If max_individual_contribution is Some and <= 0.
+    /// * If max_individual_contribution < min_contribution when both are set.
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -919,6 +931,17 @@ impl CrowdfundContract {
         // Store admin for upgrade authorization.
         env.storage().instance().set(&DataKey::Admin, &admin);
 
+        // Validate max_individual_contribution if provided.
+        if let Some(max_limit) = max_individual_contribution {
+            if max_limit <= 0 {
+                panic!("max individual contribution must be positive");
+            }
+            if max_limit < min_contribution {
+                panic!("max individual contribution cannot be less than minimum contribution");
+            }
+        }
+
+        // Validate platform fee if provided.
         if let Some(ref config) = platform_config {
             if config.fee_bps > 10_000 {
                 panic!("platform fee cannot exceed 100%");
@@ -1011,6 +1034,14 @@ impl CrowdfundContract {
                 .instance()
                 .set(&DataKey::PlatformConfig, &config);
         }
+        
+        // Store max_individual_contribution if provided.
+        if let Some(max_limit) = max_individual_contribution {
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxIndividualContribution, &max_limit);
+        }
+        
         env.storage().instance().set(&DataKey::TotalRaised, &0i128);
         env.storage().instance().set(&DataKey::TotalRaised, &0i128);
         env.storage()
@@ -1211,6 +1242,7 @@ impl CrowdfundContract {
         }
 
     /// after the deadline has passed or if the campaign is not active.
+    /// after the deadline has passed or if they would exceed the individual limit.
     pub fn contribute(env: Env, contributor: Address, amount: i128) -> Result<(), ContractError> {
         contributor.require_auth();
 
@@ -1422,6 +1454,25 @@ impl CrowdfundContract {
             if let Err(err) = contract_state_size::validate_contributor_capacity(contributors.len())
             {
                 panic!("state size limit exceeded");
+        // Check individual contribution limit if set.
+        let contribution_key = DataKey::Contribution(contributor.clone());
+        let prev: i128 = env
+            .storage()
+            .persistent()
+            .get(&contribution_key)
+            .unwrap_or(0);
+        
+        let max_individual_contribution: Option<i128> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxIndividualContribution);
+        
+        if let Some(max_limit) = max_individual_contribution {
+            let new_total = prev
+                .checked_add(amount)
+                .expect("contribution overflow");
+            if new_total > max_limit {
+                return Err(ContractError::IndividualLimitExceeded);
             }
         }
 
@@ -1446,6 +1497,7 @@ impl CrowdfundContract {
                 ContractError::Overflow
             })?;
 
+        // Update the contributor's running total.
         env.storage()
             .persistent()
             .set(&contribution_key, &new_contribution);
@@ -3327,6 +3379,13 @@ impl CrowdfundContract {
     }
 
     /// Returns comprehensive campaign statistics.
+
+    /// Returns the maximum individual contribution amount (if set).
+    pub fn max_individual_contribution(env: Env) -> Option<i128> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MaxIndividualContribution)
+    }
 
     /// Returns comprehensive campaign statistics.
     pub fn get_stats(env: Env) -> CampaignStats {

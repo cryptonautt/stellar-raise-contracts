@@ -106,6 +106,7 @@ fn test_withdraw_only_creator_can_withdraw() {
         &None,
         &None,
         &None,
+        &min_contribution,
         &None,
         &None,
     );
@@ -152,6 +153,7 @@ fn test_contribute_requires_own_auth() {
         &None,
         &None,
         &None,
+        &min_contribution,
         &None,
         &None,
     );
@@ -192,6 +194,10 @@ fn test_initialize_requires_creator_auth() {
         &(goal * 2),
         &deadline,
         &min_contribution,
+        &None,
+        &deadline,
+        &min_contribution,
+        &None,
         &None,
     );
 
