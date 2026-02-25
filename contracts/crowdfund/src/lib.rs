@@ -5,6 +5,9 @@ use soroban_sdk::{
 };
 
 // ── Modules ──────────────────────────────────────────────────────────────────
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, token, Address, Env, String, Symbol, Vec,
+};
 
 pub mod access_control;
 pub mod admin_upgrade_mechanism;
@@ -132,6 +135,18 @@ pub struct Contribution {
     pub is_early_bird: bool,
 }
 
+/// Represents a recurring subscription for patronage campaigns.
+#[derive(Clone)]
+#[contracttype]
+pub struct Subscription {
+    /// Amount to contribute per interval.
+    pub amount: i128,
+    /// Interval in seconds between contributions.
+    pub interval: u64,
+    /// Last time the subscription was processed (ledger timestamp).
+    pub last_processed: u64,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub struct CampaignStats {
@@ -238,6 +253,16 @@ pub enum DataKey {
     TotalPledged,
     /// List of stretch goal milestones.
     StretchGoals,
+    /// Individual subscription by address (amount, interval, last_processed).
+    Subscription(Address),
+    /// List of all subscriber addresses.
+    Subscribers,
+    /// Campaign updates blog: Vec<(u64, String)> of (timestamp, update text).
+    Updates,
+    /// Whether whitelist is enabled for this campaign.
+    WhitelistEnabled,
+    /// Individual whitelist entry by address.
+    Whitelist(Address),
 }
 
 // ── Rate Limiting ──────────────────────────────────────────────────────────
@@ -300,6 +325,9 @@ pub enum ContractError {
     Tags,
     RateLimitExceeded = 9,
     ContractPaused = 10,
+    InvalidSubscriptionAmount = 11,
+    InvalidSubscriptionInterval = 12,
+    SubscriptionNotFound = 13,
 }
 
 /// Interface for an external NFT contract used to mint contributor rewards.
@@ -444,6 +472,9 @@ impl CrowdfundContract {
         env.storage().instance().set(&DataKey::MinContribution, &min_contribution);
         env.storage().instance().set(&DataKey::Category, &category);
         env.storage().instance().set(&DataKey::Tags, &tags);
+        env.storage()
+            .instance()
+            .set(&DataKey::Description, &description);
         env.storage().instance().set(&DataKey::TotalRaised, &0i128);
         env.storage()
             .instance()
@@ -474,6 +505,34 @@ impl CrowdfundContract {
             .persistent()
             .get(&DataKey::Contributors)
             .unwrap_or(Vec::new(&env))
+    /// Adds addresses to the campaign's whitelist.
+    ///
+    /// This function is restricted to the campaign creator and can only be
+    /// called while the campaign is Active.
+    pub fn add_to_whitelist(env: Env, addresses: Vec<Address>) {
+        if addresses.is_empty() {
+            panic!("addresses list must not be empty");
+        }
+
+        let status: Status = env.storage().instance().get(&DataKey::Status).unwrap();
+        if status != Status::Active {
+            panic!("campaign is not active");
+        }
+
+        let creator: Address = env.storage().instance().get(&DataKey::Creator).unwrap();
+        creator.require_auth();
+
+        if !env.storage().instance().has(&DataKey::WhitelistEnabled) {
+            env.storage()
+                .instance()
+                .set(&DataKey::WhitelistEnabled, &true);
+        }
+
+        for address in addresses.iter() {
+            env.storage()
+                .instance()
+                .set(&DataKey::Whitelist(address), &true);
+        }
     }
 
     /// Contribute tokens to the campaign.
@@ -1023,6 +1082,11 @@ impl CrowdfundContract {
             .publish(("campaign", "finalized"), new_status.clone());
 
         Ok(new_status)
+        // Update global total raised.
+        let total: i128 = env.storage().instance().get(&DataKey::TotalRaised).unwrap();
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalRaised, &(total - amount));
     }
 
     /// Returns the current stored campaign status.
@@ -1293,6 +1357,28 @@ impl CrowdfundContract {
         env.storage()
             .instance()
             .set(&DataKey::Status, &Status::Cancelled);
+        // Transfer tokens back to the contributor.
+        let token_address: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let token_client = token::Client::new(&env, &token_address);
+        token_client.transfer(&env.current_contract_address(), &contributor, &amount);
+
+        // Reset the contributor's contribution to 0.
+        env.storage().persistent().set(&contribution_key, &0i128);
+        env.storage()
+            .persistent()
+            .extend_ttl(&contribution_key, 100, 100);
+
+        // Update total raised.
+        let new_total = total - amount;
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalRaised, &new_total);
+
+        // Emit refund event
+        env.events()
+            .publish(("campaign", "refunded"), (contributor.clone(), amount));
+
+        Ok(())
     }
 
     /// Cancel the campaign and refund all contributors — callable only by
@@ -1815,6 +1901,46 @@ impl CrowdfundContract {
 
     /// Returns the maximum individual contribution amount (if set).
     pub fn max_individual_contribution(env: Env) -> Option<i128> {
+    /// Returns the campaign creator's address.
+    pub fn creator(env: Env) -> Address {
+        env.storage().instance().get(&DataKey::Creator).unwrap()
+    }
+
+    /// Returns complete campaign information in a single call.
+    pub fn get_campaign_info(env: Env) -> CampaignInfo {
+        let creator: Address = env.storage().instance().get(&DataKey::Creator).unwrap();
+        let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let goal: i128 = env.storage().instance().get(&DataKey::Goal).unwrap();
+        let deadline: u64 = env.storage().instance().get(&DataKey::Deadline).unwrap();
+        let total_raised: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalRaised)
+            .unwrap_or(0);
+        let title: String = env
+            .storage()
+            .instance()
+            .get(&DataKey::Title)
+            .unwrap_or_else(|| String::from_str(&env, ""));
+        let description: String = env
+            .storage()
+            .instance()
+            .get(&DataKey::Description)
+            .unwrap_or_else(|| String::from_str(&env, ""));
+
+        CampaignInfo {
+            creator,
+            token,
+            goal,
+            deadline,
+            total_raised,
+            title,
+            description,
+        }
+    }
+
+    /// Returns true if the address is whitelisted.
+    pub fn is_whitelisted(env: Env, address: Address) -> bool {
         env.storage()
             .instance()
             .get(&DataKey::MaxIndividualContribution)
@@ -1908,4 +2034,245 @@ impl CrowdfundContract {
             .unwrap_or(Vec::new(&env))
     }
 
+    // ── Subscription Model (Patronage Campaigns) ───────────────────────────
+
+    /// Subscribe to recurring contributions (patronage model).
+    ///
+    /// Allows a user to commit to contributing a certain amount every X seconds.
+    /// The subscription will be processed by calling `process_subscriptions`.
+    ///
+    /// # Arguments
+    /// * `user` – The subscriber's address
+    /// * `amount` – Amount to contribute per interval (must be > 0 and >= min_contribution)
+    /// * `interval` – Time in seconds between contributions (must be > 0)
+    ///
+    /// # Errors
+    /// * `InvalidSubscriptionAmount` – If amount <= 0 or < min_contribution
+    /// * `InvalidSubscriptionInterval` – If interval <= 0
+    pub fn subscribe(
+        env: Env,
+        user: Address,
+        amount: i128,
+        interval: u64,
+    ) -> Result<(), ContractError> {
+        user.require_auth();
+
+        // Validate amount
+        if amount <= 0 {
+            return Err(ContractError::InvalidSubscriptionAmount);
+        }
+
+        // Validate interval
+        if interval == 0 {
+            return Err(ContractError::InvalidSubscriptionInterval);
+        }
+
+        // Check minimum contribution
+        let min_contribution: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinContribution)
+            .unwrap_or(0);
+        if amount < min_contribution {
+            return Err(ContractError::InvalidSubscriptionAmount);
+        }
+
+        // Create subscription
+        let subscription = Subscription {
+            amount,
+            interval,
+            last_processed: env.ledger().timestamp(),
+        };
+
+        // Store subscription
+        let sub_key = DataKey::Subscription(user.clone());
+        env.storage().persistent().set(&sub_key, &subscription);
+        env.storage().persistent().extend_ttl(&sub_key, 100, 100);
+
+        // Add to subscribers list if not already present
+        let mut subscribers: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Subscribers)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        if !subscribers.contains(&user) {
+            subscribers.push_back(user.clone());
+            env.storage()
+                .persistent()
+                .set(&DataKey::Subscribers, &subscribers);
+            env.storage()
+                .persistent()
+                .extend_ttl(&DataKey::Subscribers, 100, 100);
+        }
+
+        // Emit event
+        env.events().publish(
+            ("campaign", "subscription_created"),
+            (user, amount, interval),
+        );
+
+        Ok(())
+    }
+
+    /// Process all active subscriptions.
+    ///
+    /// Can be called by anyone to process subscriptions whose interval has elapsed.
+    /// Transfers funds from subscribers to the campaign for each eligible subscription.
+    ///
+    /// # Returns
+    /// Number of subscriptions processed
+    pub fn process_subscriptions(env: Env) -> u32 {
+        let status: Status = env.storage().instance().get(&DataKey::Status).unwrap();
+        if status != Status::Active {
+            return 0;
+        }
+
+        let subscribers: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Subscribers)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let current_time = env.ledger().timestamp();
+        let token_address: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let token_client = token::Client::new(&env, &token_address);
+
+        let mut processed_count: u32 = 0;
+
+        for subscriber in subscribers.iter() {
+            let sub_key = DataKey::Subscription(subscriber.clone());
+            if let Some(mut subscription) =
+                env.storage().persistent().get::<_, Subscription>(&sub_key)
+            {
+                // Check if interval has elapsed
+                if current_time >= subscription.last_processed + subscription.interval {
+                    // Transfer funds
+                    token_client.transfer(
+                        &subscriber,
+                        &env.current_contract_address(),
+                        &subscription.amount,
+                    );
+
+                    // Update total raised
+                    let total: i128 = env
+                        .storage()
+                        .instance()
+                        .get(&DataKey::TotalRaised)
+                        .unwrap_or(0);
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::TotalRaised, &(total + subscription.amount));
+
+                    // Update contribution tracking
+                    let contrib_key = DataKey::Contribution(subscriber.clone());
+                    let previous_amount: i128 =
+                        env.storage().persistent().get(&contrib_key).unwrap_or(0);
+                    env.storage()
+                        .persistent()
+                        .set(&contrib_key, &(previous_amount + subscription.amount));
+                    env.storage()
+                        .persistent()
+                        .extend_ttl(&contrib_key, 100, 100);
+
+                    // Add to contributors list if not already present
+                    let mut contributors: Vec<Address> = env
+                        .storage()
+                        .persistent()
+                        .get(&DataKey::Contributors)
+                        .unwrap_or_else(|| Vec::new(&env));
+
+                    if !contributors.contains(&subscriber) {
+                        contributors.push_back(subscriber.clone());
+                        env.storage()
+                            .persistent()
+                            .set(&DataKey::Contributors, &contributors);
+                        env.storage()
+                            .persistent()
+                            .extend_ttl(&DataKey::Contributors, 100, 100);
+                    }
+
+                    // Update last_processed
+                    subscription.last_processed = current_time;
+                    env.storage().persistent().set(&sub_key, &subscription);
+                    env.storage().persistent().extend_ttl(&sub_key, 100, 100);
+
+                    // Emit event
+                    env.events().publish(
+                        ("campaign", "subscription_processed"),
+                        (subscriber, subscription.amount),
+                    );
+
+                    processed_count += 1;
+                }
+            }
+        }
+
+        processed_count
+    }
+
+    /// Cancel a subscription.
+    ///
+    /// Allows a subscriber to cancel their recurring contributions.
+    ///
+    /// # Arguments
+    /// * `user` – The subscriber's address
+    ///
+    /// # Errors
+    /// * `SubscriptionNotFound` – If no subscription exists for this user
+    pub fn unsubscribe(env: Env, user: Address) -> Result<(), ContractError> {
+        user.require_auth();
+
+        let sub_key = DataKey::Subscription(user.clone());
+
+        // Check if subscription exists
+        if !env.storage().persistent().has(&sub_key) {
+            return Err(ContractError::SubscriptionNotFound);
+        }
+
+        // Remove subscription
+        env.storage().persistent().remove(&sub_key);
+
+        // Remove from subscribers list
+        let mut subscribers: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Subscribers)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        if let Some(index) = subscribers.first_index_of(&user) {
+            subscribers.remove(index);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Subscribers, &subscribers);
+            env.storage()
+                .persistent()
+                .extend_ttl(&DataKey::Subscribers, 100, 100);
+        }
+
+        // Emit event
+        env.events()
+            .publish(("campaign", "subscription_cancelled"), user);
+
+        Ok(())
+    }
+
+    /// Get subscription details for a user.
+    ///
+    /// # Arguments
+    /// * `user` – The subscriber's address
+    ///
+    /// # Returns
+    /// * `Some(Subscription)` if subscription exists, `None` otherwise
+    pub fn get_subscription(env: Env, user: Address) -> Option<Subscription> {
+        env.storage().persistent().get(&DataKey::Subscription(user))
+    }
+
+    /// Get list of all subscribers.
+    pub fn get_subscribers(env: Env) -> Vec<Address> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Subscribers)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
 }
