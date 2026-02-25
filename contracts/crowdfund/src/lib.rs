@@ -109,6 +109,7 @@ pub enum Status {
 
 /// Represents a single roadmap milestone with a date and description.
 const CONTRACT_VERSION: u32 = 3;
+const CONTRIBUTION_COOLDOWN: u64 = 60; // 60 seconds cooldown
 
 /// Contract version constant.
 ///
@@ -340,6 +341,12 @@ use soroban_sdk::contracterror;
 
 /// Errors that can be returned by the crowdfund contract.
     NFTContract,
+    /// Hard cap for the campaign.
+    HardCap,
+    /// NFT contract address for minting commemorative tokens.
+    NFTContract,
+    /// Last contribution time for rate limiting.
+    LastContributionTime(Address),
 }
 
 #[contracterror]
@@ -582,6 +589,7 @@ impl CrowdfundContract {
         platform_config: Option<PlatformConfig>,
         bonus_goal: Option<i128>,
         bonus_goal_description: Option<String>,
+        hard_cap: Option<i128>,
     ) -> Result<(), ContractError> {
         execute_initialize(
             &env,
@@ -630,7 +638,9 @@ impl CrowdfundContract {
                 .instance()
                 .set(&DataKey::PlatformConfig, config);
         }
-        if hard_cap < goal {
+
+        let hard_cap_value = hard_cap.unwrap_or(goal * 2); // Default to 2x goal
+        if hard_cap_value < goal {
             return Err(ContractError::InvalidHardCap);
         }
 
@@ -689,7 +699,7 @@ impl CrowdfundContract {
         env.storage().instance().set(&DataKey::Creator, &creator);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::Goal, &goal);
-        env.storage().instance().set(&DataKey::HardCap, &hard_cap);
+        env.storage().instance().set(&DataKey::HardCap, &hard_cap_value);
         env.storage().instance().set(&DataKey::Deadline, &deadline);
         env.storage()
             .instance()
@@ -1117,7 +1127,7 @@ impl CrowdfundContract {
             .publish(("campaign", "contributed"), (contributor.clone(), effective_amount));
         env.events().publish(
             ("campaign", "contributed"),
-            (contributor.clone(), effective_amount),
+            (contributor.clone(), amount),
         );
             .publish(("campaign", "contributed"), (contributor.clone(), effective_amount));
 
@@ -1129,7 +1139,7 @@ impl CrowdfundContract {
                     env.storage().persistent().get(&referral_key).unwrap_or(0);
 
                 let new_tally = current_tally
-                    .checked_add(effective_amount)
+                    .checked_add(amount)
                     .ok_or(ContractError::Overflow)?;
 
                 env.storage().persistent().set(&referral_key, &new_tally);
@@ -1153,7 +1163,7 @@ impl CrowdfundContract {
                 // Emit referral event
                 env.events().publish(
                     ("campaign", "referral"),
-                    (referrer, contributor, effective_amount),
+                    (referrer, contributor, amount),
                 );
                 env.events()
                     .publish(("campaign", "referral"), (referrer, contributor, effective_amount));
