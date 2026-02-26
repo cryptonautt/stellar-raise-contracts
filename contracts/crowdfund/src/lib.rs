@@ -161,6 +161,32 @@ pub struct CampaignStats {
 /// Represents all storage keys used by the crowdfund contract.
 #[derive(Clone)]
 #[contracttype]
+pub struct CampaignInfo {
+    pub creator: Address,
+    pub token: Address,
+    pub goal: i128,
+    pub deadline: u64,
+    pub total_raised: i128,
+    pub title: String,
+    pub description: String,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct PlatformConfig {
+    pub address: Address,
+    pub fee_bps: u32,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct FeeTier {
+    pub threshold: i128,
+    pub fee_bps: u32,
+}
+
+#[derive(Clone)]
+#[contracttype]
 pub enum DataKey {
     /// Whether the campaign is paused.
     Paused,
@@ -328,6 +354,10 @@ pub enum ContractError {
     InvalidSubscriptionAmount = 11,
     InvalidSubscriptionInterval = 12,
     SubscriptionNotFound = 13,
+    /// Platform configuration for fee handling.
+    PlatformConfig,
+    /// Fee tiers for dynamic fee calculation.
+    FeeTiers,
 }
 
 /// Interface for an external NFT contract used to mint contributor rewards.
@@ -468,6 +498,8 @@ impl CrowdfundContract {
     /// * `category`         – Primary campaign category (e.g. Technology, Art).
     /// * `tags`             – Optional descriptive tags for the campaign.
     #[allow(clippy::too_many_arguments)]
+    /// * `platform_config`  – Optional platform configuration (address and fee in basis points).
+    /// * `fee_tiers`        – Optional fee tiers for dynamic fee calculation.
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -498,6 +530,8 @@ impl CrowdfundContract {
         )
         category: soroban_sdk::String,
         tags: Vec<soroban_sdk::String>,
+        platform_config: Option<PlatformConfig>,
+        fee_tiers: Option<Vec<FeeTier>>,
     ) {
         // Prevent re-initialization.
         if env.storage().instance().has(&DataKey::Creator) {
@@ -523,6 +557,29 @@ impl CrowdfundContract {
         if let Some(ref config) = platform_config {
             if config.fee_bps > 10_000 {
                 panic!("platform fee cannot exceed 100%");
+            }
+        }
+
+        // Validate and store fee tiers if provided.
+        if let Some(ref tiers) = fee_tiers {
+            if !tiers.is_empty() {
+                // Validate each tier's fee_bps.
+                for tier in tiers.iter() {
+                    if tier.fee_bps > 10_000 {
+                        panic!("fee tier fee_bps cannot exceed 10000");
+                    }
+                }
+
+                // Validate tiers are ordered by threshold ascending.
+                for i in 1..tiers.len() {
+                    let prev = tiers.get(i - 1).unwrap();
+                    let curr = tiers.get(i).unwrap();
+                    if curr.threshold <= prev.threshold {
+                        panic!("fee tiers must be ordered by threshold ascending");
+                    }
+                }
+
+                env.storage().instance().set(&DataKey::FeeTiers, tiers);
             }
         }
 
@@ -561,6 +618,11 @@ impl CrowdfundContract {
             .instance()
             .set(&DataKey::Status, &Status::Active);
         env.storage().instance().set(&DataKey::Paused, &false);
+
+        // Store platform config if provided.
+        if let Some(config) = platform_config {
+            env.storage().instance().set(&DataKey::PlatformConfig, &config);
+        }
 
         let empty_contributors: Vec<Address> = Vec::new(&env);
         env.storage()
@@ -1314,6 +1376,17 @@ impl CrowdfundContract {
                 .expect("fee calculation overflow")
                 .checked_div(10_000)
                 .expect("fee division by zero");
+        let platform_config: Option<PlatformConfig> = env.storage().instance().get(&DataKey::PlatformConfig);
+        let fee_tiers: Option<Vec<FeeTier>> = env.storage().instance().get(&DataKey::FeeTiers);
+
+        let creator_payout = if let Some(config) = platform_config {
+            let fee = if let Some(tiers) = fee_tiers {
+                // Use tiered fee calculation.
+                Self::calculate_tiered_fee(&env, total, &tiers)
+            } else {
+                // Fall back to flat fee.
+                total * config.fee_bps as i128 / 10_000
+            };
 
             // Transfer fee to platform.
             token_client.transfer(&env.current_contract_address(), &config.address, &fee);
@@ -1324,6 +1397,7 @@ impl CrowdfundContract {
 
             // Calculate creator payout.
             total.checked_sub(fee).expect("creator payout underflow")
+            total - fee
         } else {
             total
         };
@@ -1384,6 +1458,35 @@ impl CrowdfundContract {
         contributor.require_auth();
 
         // Check campaign status is Active.
+    /// Calculate tiered fee based on total raised and fee tiers.
+    fn calculate_tiered_fee(_env: &Env, total: i128, tiers: &Vec<FeeTier>) -> i128 {
+        let mut fee = 0i128;
+        let mut prev_threshold = 0i128;
+
+        for tier in tiers.iter() {
+            if total <= prev_threshold {
+                break;
+            }
+
+            let portion_end = if total < tier.threshold { total } else { tier.threshold };
+            let portion = portion_end - prev_threshold;
+            let portion_fee = portion * tier.fee_bps as i128 / 10_000;
+
+            fee += portion_fee;
+            prev_threshold = tier.threshold;
+        }
+
+        // Apply the last tier's rate to any amount above the highest threshold.
+        if total > prev_threshold && !tiers.is_empty() {
+            let last_tier = tiers.get(tiers.len() - 1).unwrap();
+            let remaining = total - prev_threshold;
+            let remaining_fee = remaining * last_tier.fee_bps as i128 / 10_000;
+            fee += remaining_fee;
+        }
+
+        fee
+    }
+
     /// Refund all contributors — callable by anyone after the deadline
     /// if the goal was **not** met.
     pub fn refund(env: Env) -> Result<(), ContractError> {
@@ -2419,5 +2522,8 @@ impl CrowdfundContract {
             .persistent()
             .get(&DataKey::Subscribers)
             .unwrap_or_else(|| Vec::new(&env))
+    /// Returns the configured fee tiers.
+    pub fn fee_tiers(env: Env) -> Vec<FeeTier> {
+        env.storage().instance().get(&DataKey::FeeTiers).unwrap_or_else(|| Vec::new(&env))
     }
 }
