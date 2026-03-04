@@ -351,7 +351,7 @@ mod tests {
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, String, Symbol, Vec,
+    contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, Symbol, Vec,
 };
 
 #[cfg(test)]
@@ -399,8 +399,8 @@ impl FactoryContract {
 
         // Initialize the deployed contract.
         // Keep factory API stable: use default min contribution and no platform config.
-        let min_contribution: i128 = 1_000;
-        let no_platform_config: Option<soroban_sdk::Val> = None;
+        let _min_contribution: i128 = 1_000;
+        let _no_platform_config: Option<soroban_sdk::Val> = None;
         let _: () = env.invoke_contract(
             &deployed_address,
             &Symbol::new(&env, "initialize"),
