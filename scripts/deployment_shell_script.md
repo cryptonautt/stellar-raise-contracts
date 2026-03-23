@@ -3,6 +3,7 @@
 Builds, deploys, and initialises the Stellar Raise crowdfund contract with
 structured error capturing, timestamped logging, and a machine-readable JSON
 event stream for the frontend UI.
+structured error capturing and timestamped logging.
 
 ## Why this script exists
 
@@ -38,6 +39,11 @@ actionable message. This script adds:
 | `DEFAULT_DEPLOY_LOG`      | `deploy_errors.log`                            | Default log file path            |
 | `DEFAULT_MIN_CONTRIBUTION`| `1`                                            | Default minimum pledge (stroops) |
 
+- Per-step exit codes (2–5) so CI can distinguish build vs deploy vs init failures.
+- All stderr captured to `DEPLOY_LOG` (default `deploy_errors.log`) alongside
+  timestamped stdout entries.
+- Argument validation with clear messages before any network call is made.
+
 ## Usage
 
 ```bash
@@ -60,6 +66,20 @@ actionable message. This script adds:
 | `DEPLOY_LOG`      | `deploy_errors.log`  | Human-readable timestamped log                   |
 | `DEPLOY_JSON_LOG` | `deploy_events.json` | Structured NDJSON event log for the frontend UI  |
 | `DRY_RUN`         | `false`              | Set to `true` to validate without deploying      |
+| Parameter         | Type    | Description                                      |
+| :---------------- | :------ | :----------------------------------------------- |
+| `creator`         | string  | Stellar address of the campaign creator          |
+| `token`           | string  | Stellar address of the token contract            |
+| `goal`            | integer | Funding goal in stroops                          |
+| `deadline`        | integer | Unix timestamp — must be in the future           |
+| `min_contribution`| integer | Minimum pledge amount (default: `1`)             |
+
+### Environment variables
+
+| Variable     | Default            | Description                        |
+| :----------- | :----------------- | :--------------------------------- |
+| `NETWORK`    | `testnet`          | Stellar network to target          |
+| `DEPLOY_LOG` | `deploy_errors.log`| File that captures all error output|
 
 ### Example
 
@@ -82,6 +102,16 @@ DEADLINE=$(date -d "+30 days" +%s)
 | 6    | Network connectivity failure             |
 
 ## Human-readable log format
+| Code | Meaning                        |
+| :--- | :----------------------------- |
+| 0    | Success                        |
+| 1    | Missing dependency (cargo / stellar CLI) |
+| 2    | Invalid or missing argument    |
+| 3    | `cargo build` failure          |
+| 4    | `stellar contract deploy` failure |
+| 5    | `stellar contract invoke` (init) failure |
+
+## Error log format
 
 Every line written to `DEPLOY_LOG` follows:
 
@@ -148,6 +178,11 @@ for await (const line of readLines('deploy_events.json')) {
   }
 }
 ```
+[2026-03-23T16:00:00Z] [INFO|WARN|ERROR] <message>
+```
+
+Stderr from `cargo` and `stellar` is appended verbatim after the tagged line,
+making it straightforward to `grep` for specific failures in CI logs.
 
 ## Security assumptions
 
@@ -160,6 +195,11 @@ for await (const line of readLines('deploy_events.json')) {
 - `set -euo pipefail` ensures unhandled errors abort execution immediately.
 - Double-quotes and backslashes in error messages are escaped before being
   written to JSON, preventing log-injection attacks.
+  creator address. Never pass a raw secret key; use a named Stellar CLI identity.
+- `DEPLOY_LOG` may contain sensitive RPC responses. Restrict file permissions
+  in production (`chmod 600 deploy_errors.log`).
+- The script does **not** store or echo secret keys at any point.
+- `set -euo pipefail` ensures unhandled errors abort execution immediately.
 
 ## Running the tests
 
@@ -186,3 +226,18 @@ and `curl` so the suite runs fully offline and in CI without network access.
 
 All 31 tests pass (≥ 95% coverage of every exported function, JSON event
 emission, and both log-truncation behaviours).
+No external test framework is required. The test file stubs `cargo` and
+`stellar` so the suite runs offline and in CI without network access.
+
+### Test coverage
+
+| Area                        | Cases |
+| :-------------------------- | :---- |
+| `require_tool`              | 2     |
+| `validate_args`             | 9     |
+| `build_contract`            | 3     |
+| `deploy_contract`           | 3     |
+| `init_contract`             | 2     |
+| `log` / `die`               | 4     |
+| `DEPLOY_LOG` file behaviour | 2     |
+| **Total**                   | **25**|

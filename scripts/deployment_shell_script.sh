@@ -7,6 +7,7 @@
 #          Structured JSON log → DEPLOY_JSON_LOG (default: deploy_events.json)
 #            Each line is a self-contained JSON object (NDJSON) the frontend UI
 #            can stream-parse to display live progress and typed error messages.
+#          All errors are captured to DEPLOY_LOG (default: deploy_errors.log).
 #          Exit codes:
 #            0  – success
 #            1  – missing dependency
@@ -43,6 +44,18 @@ ERROR_COUNT=0
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 # @notice Writes a timestamped message to stdout and the human-readable log.
+
+set -euo pipefail
+
+# ── Configuration ────────────────────────────────────────────────────────────
+
+NETWORK="${NETWORK:-testnet}"
+DEPLOY_LOG="${DEPLOY_LOG:-deploy_errors.log}"
+WASM_PATH="target/wasm32-unknown-unknown/release/crowdfund.wasm"
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+# @notice Writes a timestamped message to stdout and the error log.
 # @param  $1  severity  (INFO | WARN | ERROR)
 # @param  $2  message
 log() {
@@ -91,6 +104,12 @@ die() {
 warn() {
   (( ERROR_COUNT++ )) || true
   log "WARN" "$1"
+# @notice Logs an error and exits with the supplied code.
+# @param  $1  exit_code
+# @param  $2  message
+die() {
+  log "ERROR" "$2"
+  exit "$1"
 }
 
 # @notice Verifies that a required CLI tool is present on PATH.
@@ -141,6 +160,7 @@ Exit codes:
   $EXIT_BAD_ARG  invalid argument    $EXIT_INIT_FAIL  init failure
 HELPEOF
   exit $EXIT_OK
+  command -v "$1" &>/dev/null || die 1 "Required tool not found: $1"
 }
 
 # ── Argument validation ───────────────────────────────────────────────────────
@@ -187,6 +207,23 @@ check_network() {
   fi
   emit_event "step_ok" "network_check" "Network reachable"
   log "INFO" "Network reachable."
+# @notice Validates all required positional arguments.
+# @param  $1  creator   – Stellar address of the campaign creator
+# @param  $2  token     – Stellar address of the token contract
+# @param  $3  goal      – Funding goal (integer, stroops)
+# @param  $4  deadline  – Unix timestamp for campaign end
+# @param  $5  min_contribution – Minimum pledge amount (default: 1)
+validate_args() {
+  local creator="$1" token="$2" goal="$3" deadline="$4" min_contribution="$5"
+
+  [[ -n "$creator" ]]          || die 2 "creator is required"
+  [[ -n "$token" ]]            || die 2 "token is required"
+  [[ "$goal" =~ ^[0-9]+$ ]]   || die 2 "goal must be a positive integer, got: '$goal'"
+  [[ "$deadline" =~ ^[0-9]+$ ]] || die 2 "deadline must be a Unix timestamp, got: '$deadline'"
+  [[ "$min_contribution" =~ ^[0-9]+$ ]] || die 2 "min_contribution must be a positive integer"
+
+  local now; now="$(date +%s)"
+  (( deadline > now )) || die 2 "deadline must be in the future (got $deadline, now $now)"
 }
 
 # ── Core steps ───────────────────────────────────────────────────────────────
@@ -210,6 +247,20 @@ build_contract() {
 deploy_contract() {
   local source="$1"
   emit_event "step_start" "deploy" "Deploying to $NETWORK"
+# @notice Compiles the contract to WASM.
+build_contract() {
+  log "INFO" "Building WASM..."
+  if ! cargo build --target wasm32-unknown-unknown --release 2>>"$DEPLOY_LOG"; then
+    die 3 "cargo build failed – see $DEPLOY_LOG for details"
+  fi
+  [[ -f "$WASM_PATH" ]] || die 3 "WASM artifact not found at $WASM_PATH after build"
+  log "INFO" "Build succeeded: $WASM_PATH"
+}
+
+# @notice Deploys the WASM to the network and returns the contract ID via stdout.
+# @param  $1  source – signing identity / secret key
+deploy_contract() {
+  local source="$1"
   log "INFO" "Deploying to $NETWORK..."
   local contract_id
   if ! contract_id=$(stellar contract deploy \
@@ -221,6 +272,9 @@ deploy_contract() {
   fi
   [[ -n "$contract_id" ]] || die 4 "Deploy returned an empty contract ID" "" "deploy"
   emit_event "step_ok" "deploy" "Contract deployed" "\"contract_id\":\"$contract_id\""
+    die 4 "stellar contract deploy failed – see $DEPLOY_LOG for details"
+  fi
+  [[ -n "$contract_id" ]] || die 4 "Deploy returned an empty contract ID"
   log "INFO" "Contract deployed: $contract_id"
   echo "$contract_id"
 }
@@ -284,6 +338,22 @@ main() {
   # Truncate both logs for this run
   : > "$DEPLOY_LOG"
   : > "$DEPLOY_JSON_LOG"
+    die 5 "Contract initialisation failed – see $DEPLOY_LOG for details"
+  fi
+  log "INFO" "Campaign initialised successfully."
+}
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+main() {
+  local creator="${1:-}"
+  local token="${2:-}"
+  local goal="${3:-}"
+  local deadline="${4:-}"
+  local min_contribution="${5:-1}"
+
+  # Truncate log for this run
+  : > "$DEPLOY_LOG"
 
   require_tool cargo
   require_tool stellar
