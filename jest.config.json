@@ -28,6 +28,8 @@
           "allowSyntheticDefaultImports": true,
           "module": "commonjs"
         }
+        "module": "commonjs",
+        "allowJs": true
       }
     ]
   },
