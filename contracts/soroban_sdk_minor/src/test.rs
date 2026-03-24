@@ -146,14 +146,13 @@ fn setup() -> (Env, SorobanSdkMinorClient<'static>) {
 
 // ── init ──────────────────────────────────────────────────────────────────────
 
+// ── init ──────────────────────────────────────────────────────────────────────
+
 /// Happy path: init stores the admin and get_admin returns it.
 #[test]
 fn test_init_stores_admin() {
     let (env, client) = setup();
     let admin = Address::generate(&env);
-    client.init(&admin);
-
-    // Test initialization
     client.init(&admin);
 
     assert_eq!(client.get_admin(), admin);
