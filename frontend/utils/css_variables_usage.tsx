@@ -187,6 +187,14 @@ export const ALLOWED_CSS_VARIABLES = [
   '--safe-area-inset-right',
   '--safe-area-inset-bottom',
   '--safe-area-inset-left',
+
+  // Documentation
+  '--color-docs-bg',
+  '--color-docs-text',
+  '--color-docs-link',
+  '--color-docs-accent',
+  '--font-docs-code',
+  '--space-docs-content',
 ] as const;
 
 /**
