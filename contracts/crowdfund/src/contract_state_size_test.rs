@@ -10,6 +10,14 @@
 
 use soroban_sdk::{contract, contractimpl, testutils::Address as _, Address, Env, String, Vec};
 
+#![cfg(test)]
+
+use soroban_sdk::{
+    contract, contractimpl,
+    testutils::Address as _,
+    Address, Env, String, Vec,
+};
+
 use crate::{
     contract_state_size::{
         check_contributor_limit, check_pledger_limit, check_roadmap_limit,
@@ -20,6 +28,8 @@ use crate::{
         MAX_BONUS_GOAL_DESCRIPTION_LENGTH, MAX_CONTRIBUTORS, MAX_DESCRIPTION_LENGTH,
         MAX_METADATA_TOTAL_LENGTH, MAX_PLEDGERS, MAX_ROADMAP_DESCRIPTION_LENGTH, MAX_ROADMAP_ITEMS,
         MAX_SOCIAL_LINKS_LENGTH, MAX_STRETCH_GOALS, MAX_STRING_LEN, MAX_TITLE_LENGTH,
+        check_stretch_goal_limit, check_string_len, StateSizeError, MAX_CONTRIBUTORS,
+        MAX_ROADMAP_ITEMS, MAX_STRETCH_GOALS, MAX_STRING_LEN,
     },
     DataKey, RoadmapItem,
 };
@@ -44,11 +54,15 @@ fn make_env() -> (Env, soroban_sdk::Address) {
 /// `n` must be ≤ 2304 for this helper (supports MAX_STRING_LEN + overflow cases).
 fn str_of_len(env: &Env, n: u32) -> String {
     assert!(n <= 2304, "str_of_len: n too large for test helper");
+/// `n` must be ≤ 512.
+fn str_of_len(env: &Env, n: u32) -> String {
+    assert!(n <= 512, "str_of_len: n too large for test helper");
     let mut b = soroban_sdk::Bytes::new(env);
     for _ in 0..n {
         b.push_back(b'a');
     }
     let mut buf = [0u8; 2304];
+    let mut buf = [0u8; 512];
     b.copy_into_slice(&mut buf[..n as usize]);
     String::from_bytes(env, &buf[..n as usize])
 }
@@ -60,6 +74,13 @@ fn constants_have_expected_values() {
     assert_eq!(MAX_CONTRIBUTORS, 128);
     assert_eq!(MAX_ROADMAP_ITEMS, 32);
     assert_eq!(MAX_STRETCH_GOALS, 32);
+// ── constant sanity checks ────────────────────────────────────────────────────
+
+#[test]
+fn constants_have_expected_values() {
+    assert_eq!(MAX_CONTRIBUTORS, 1_000);
+    assert_eq!(MAX_ROADMAP_ITEMS, 20);
+    assert_eq!(MAX_STRETCH_GOALS, 10);
     assert_eq!(MAX_STRING_LEN, 256);
 }
 
@@ -72,6 +93,9 @@ fn error_discriminants_are_stable() {
     assert_eq!(StateSizeError::RoadmapLimitExceeded as u32, 102);
     assert_eq!(StateSizeError::StretchGoalLimitExceeded as u32, 103);
     assert_eq!(StateSizeError::StringTooLong as u32, 104);
+    assert_eq!(StateSizeError::RoadmapLimitExceeded as u32, 101);
+    assert_eq!(StateSizeError::StretchGoalLimitExceeded as u32, 102);
+    assert_eq!(StateSizeError::StringTooLong as u32, 103);
 }
 
 // ── check_string_len ─────────────────────────────────────────────────────────
@@ -182,6 +206,7 @@ fn pledger_limit_below_max_is_ok() {
         let mut list: Vec<Address> = Vec::new(&env);
         // Use MAX_CONTRIBUTORS as proxy for MAX_PLEDGERS (both are 128)
         for _ in 0..crate::contract_state_size::MAX_PLEDGERS - 1 {
+        for _ in 0..MAX_CONTRIBUTORS - 1 {
             list.push_back(Address::generate(&env));
         }
         env.storage().persistent().set(&DataKey::Pledgers, &list);
@@ -195,12 +220,14 @@ fn pledger_limit_at_max_is_err() {
     env.as_contract(&contract_id, || {
         let mut list: Vec<Address> = Vec::new(&env);
         for _ in 0..crate::contract_state_size::MAX_PLEDGERS {
+        for _ in 0..MAX_CONTRIBUTORS {
             list.push_back(Address::generate(&env));
         }
         env.storage().persistent().set(&DataKey::Pledgers, &list);
         assert_eq!(
             check_pledger_limit(&env),
             Err(StateSizeError::PledgerLimitExceeded)
+            Err(StateSizeError::ContributorLimitExceeded)
         );
     });
 }

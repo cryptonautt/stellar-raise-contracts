@@ -17,6 +17,10 @@ use soroban_sdk::{
 };
 use soroban_sdk::{contract, contractimpl, contracterror, contracttype, token, Address, Env, String, Symbol, Vec};
 mod refund_single_token;
+pub mod contract_state_size;
+#[cfg(test)]
+mod contract_state_size_test;
+
 pub mod refund_single_token;
 use refund_single_token::refund_single_transfer;
 
@@ -1147,6 +1151,9 @@ impl CrowdfundContract {
 
         if !contributors.contains(&contributor) {
         if is_new_contributor {
+            // Enforce contributor list size limit before appending.
+            contract_state_size::check_contributor_limit(&env)
+                .expect("contributor limit exceeded");
             contributors.push_back(contributor.clone());
             env.storage()
                 .persistent()
@@ -1319,6 +1326,15 @@ impl CrowdfundContract {
 
         // Track pledger address if new.
         if is_new_pledger {
+        let mut pledgers: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Pledgers)
+            .unwrap_or_else(|| Vec::new(&env));
+        if !pledgers.contains(&pledger) {
+            // Enforce pledger list size limit before appending.
+            contract_state_size::check_pledger_limit(&env)
+                .expect("pledger limit exceeded");
             pledgers.push_back(pledger.clone());
             env.storage()
                 .persistent()
