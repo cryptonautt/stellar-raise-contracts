@@ -12,6 +12,9 @@
 //!   `total_raised`; the large-amount test exercises this path.
 //! Tests for refund_single() token transfer logic.
 //!   contributor; the balance assertions confirm direction.
+//! - Direction lock: The token transfer explicitly uses the contract's address
+//!   as the sender and the contributor as the recipient; the balance assertions
+//!   confirm direction.
 //! - Overflow protection: `execute_refund_single` uses `checked_sub` on
 //!   `total_raised`; the large-amount test exercises this path.
 
