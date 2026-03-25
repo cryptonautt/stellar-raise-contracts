@@ -468,8 +468,7 @@ async function claimRefund(
 
 ## Test Coverage
 
-See [`refund_single_token_tests.rs`](./refund_single_token_tests.rs) for the
-full test suite. Tests cover:
+### `refund_single_token.test.rs` — unit tests for module internals
 
 - Basic single-contributor refund
 - Multi-contributor independent claims
@@ -486,3 +485,31 @@ full test suite. Tests cover:
 - Contribution record zeroed after claim
 - Partial claims (other contributors unaffected)
 - Minimum contribution boundary
+Tests `validate_refund_preconditions` and `execute_refund_single` directly
+via `env.as_contract`, covering:
+
+| Test | What it validates |
+|------|-------------------|
+| `test_validate_returns_amount_on_success` | Happy path — returns contribution amount |
+| `test_validate_before_deadline_returns_campaign_still_active` | Deadline guard |
+| `test_validate_at_deadline_boundary_returns_campaign_still_active` | Strict `>` boundary |
+| `test_validate_goal_reached_returns_goal_reached` | Goal exactly met |
+| `test_validate_goal_exceeded_returns_goal_reached` | Goal exceeded |
+| `test_validate_no_contribution_returns_nothing_to_refund` | Unknown address |
+| `test_validate_after_refund_returns_nothing_to_refund` | Already-claimed address |
+| `test_validate_panics_on_successful_campaign` | Status guard — Successful |
+| `test_validate_panics_on_cancelled_campaign` | Status guard — Cancelled |
+| `test_execute_transfers_correct_amount` | Token balance after transfer |
+| `test_execute_zeroes_storage_before_transfer` | CEI order |
+| `test_execute_decrements_total_raised` | Global accounting |
+| `test_execute_double_refund_prevention` | amount=0 is a no-op |
+| `test_execute_large_amount_no_overflow` | `checked_sub` on large values |
+| `test_execute_does_not_affect_other_contributors` | Isolation |
+
+### `refund_single_token_tests.rs` — integration tests via contract client
+
+Tests the full `refund_single` contract method end-to-end, covering:
+basic refund, multi-contributor, accumulated contributions, double-claim,
+zero-contribution, deadline boundary, goal-reached, campaign status guards,
+auth enforcement, interaction with deprecated `refund()`, platform fee
+isolation, contribution record zeroing, partial claims, and minimum amount.
