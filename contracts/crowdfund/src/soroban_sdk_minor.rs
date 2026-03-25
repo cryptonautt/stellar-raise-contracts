@@ -64,7 +64,7 @@
 //! - [x] Verify `CONTRACT_VERSION` constant is unchanged (storage-layout guard).
 //! - [x] Confirm `.cargo/config.toml` WASM flags are still valid.
 
-#![allow(dead_code)]
+#[allow(dead_code)]
 
 use soroban_sdk::{contracttype, Address, BytesN, Env, String, Symbol};
 

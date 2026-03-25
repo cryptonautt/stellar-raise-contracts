@@ -437,62 +437,33 @@ fn validate_string_length(
 //! }
 //! ```
 #![no_std]
-use soroban_sdk::{Env, String};
+use soroban_sdk::{Env, String, Vec, contracterror};
 
-#![allow(missing_docs)]
+#[allow(missing_docs)]
 
-use soroban_sdk::{contracterror, String, Vec};
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum StateSizeError {
+    ContributorLimitExceeded = 1,
+    RoadmapLimitExceeded = 2,
+    StretchGoalLimitExceeded = 3,
+    StringTooLong = 4,
+}
 
 // ── Limits ───────────────────────────────────────────────────────────────────
 
-/// Maximum number of unique contributors tracked on-chain.
 pub const MAX_CONTRIBUTORS: u32 = 128;
-
-/// Maximum number of unique pledgers tracked on-chain.
 pub const MAX_PLEDGERS: u32 = 128;
-
-/// Maximum number of unique pledgers tracked on-chain.
-pub const MAX_PLEDGERS: u32 = 1_000;
-
-/// Maximum number of roadmap items stored in instance storage.
 pub const MAX_ROADMAP_ITEMS: u32 = 32;
-
-/// Maximum number of stretch-goal milestones.
 pub const MAX_STRETCH_GOALS: u32 = 32;
-
-/// Maximum campaign title length in bytes.
 pub const MAX_TITLE_LENGTH: u32 = 128;
-/// Maximum campaign description length in bytes.
-pub const MAX_DESCRIPTION_LENGTH: u32 = 2_048;
-/// Maximum social-links payload length in bytes.
+pub const MAX_DESCRIPTION_LENGTH: u32 = 2048;
 pub const MAX_SOCIAL_LINKS_LENGTH: u32 = 512;
-/// Maximum bonus-goal description length in bytes.
 pub const MAX_BONUS_GOAL_DESCRIPTION_LENGTH: u32 = 280;
-/// Maximum roadmap item description length in bytes.
 pub const MAX_ROADMAP_DESCRIPTION_LENGTH: u32 = 280;
-/// Maximum combined metadata budget (`title + description + socials`) in bytes.
-pub const MAX_METADATA_TOTAL_LENGTH: u32 = 2_304;
-/// Backward-compatible generic string limit used by legacy tests/helpers.
+pub const MAX_METADATA_TOTAL_LENGTH: u32 = 2304;
 pub const MAX_STRING_LEN: u32 = 256;
-pub const MAX_CONTRIBUTORS: u32 = 1_000;
-
-/// Maximum byte length of title field.
-pub const MAX_TITLE_LENGTH: u32 = 100;
-
-/// Maximum byte length of description field.
-pub const MAX_DESCRIPTION_LENGTH: u32 = 2000;
-
-/// Maximum byte length of bonus goal description field.
-pub const MAX_BONUS_GOAL_DESCRIPTION_LENGTH: u32 = 500;
-
-/// Maximum byte length of roadmap description field.
-pub const MAX_ROADMAP_DESCRIPTION_LENGTH: u32 = 500;
-
-/// Maximum byte length of social links field.
-pub const MAX_SOCIAL_LINKS_LENGTH: u32 = 300;
-
-/// Maximum total byte length of all metadata fields combined.
-pub const MAX_METADATA_TOTAL_LENGTH: u32 = 4000;
 
 // ── Error ─────────────────────────────────────────────────────────────────────
 
@@ -566,12 +537,6 @@ pub const MAX_METADATA_TOTAL_LENGTH: u32 = 2304;
 pub const MAX_STRING_LEN: u32 = 256;
 // ── Validation helpers ────────────────────────────────────────────────────────
 
-/// Validates that a title does not exceed MAX_TITLE_LENGTH bytes.
-///
-/// @param title The title string to validate.
-/// @return Ok(()) if the title is within limits, Err with descriptive message otherwise.
-/// @notice Callers should treat errors as permanent rejections; the limit
-///         will not change without a contract upgrade.
 pub fn validate_title(title: &String) -> Result<(), &'static str> {
     if title.len() > MAX_TITLE_LENGTH {
         return Err("title exceeds MAX_TITLE_LENGTH bytes");
@@ -643,6 +608,9 @@ pub fn validate_title(value: &String) -> Result<(), &'static str> {
 pub fn validate_title(title: &String) -> Result<(), &'static str> {
     if title.len() > MAX_TITLE_LENGTH {
         return Err("title exceeds MAX_TITLE_LENGTH bytes");
+pub fn validate_description(description: &String) -> Result<(), &'static str> {
+    if description.len() > MAX_DESCRIPTION_LENGTH {
+        return Err("description exceeds MAX_DESCRIPTION_LENGTH bytes");
     }
     Ok(())
 }
@@ -738,7 +706,6 @@ pub fn validate_metadata_total_length(
     Ok(())
 }
 
-/// Validate contributor index capacity before append.
 pub fn validate_contributor_capacity(len: u32) -> Result<(), &'static str> {
     if len >= MAX_CONTRIBUTORS {
         return Err("contributors exceed MAX_CONTRIBUTORS".into());
@@ -755,7 +722,6 @@ pub fn validate_contributor_capacity(current_count: u32) -> Result<(), &'static 
     Ok(())
 }
 
-/// Validate pledger index capacity before append.
 pub fn validate_pledger_capacity(len: u32) -> Result<(), &'static str> {
     if len >= MAX_PLEDGERS {
         return Err("pledgers exceed MAX_PLEDGERS".into());
@@ -852,7 +818,7 @@ pub fn check_contributor_limit(env: &Env) -> Result<(), StateSizeError> {
     let contributors: Vec<soroban_sdk::Address> = env
         .storage()
         .persistent()
-        .get(&DataKey::Contributors)
+        .get(&crate::DataKey::Contributors)
         .unwrap_or_else(|| Vec::new(env));
 
     if contributors.len() >= MAX_CONTRIBUTORS {
@@ -996,7 +962,7 @@ pub fn check_pledger_limit(env: &Env) -> Result<(), StateSizeError> {
     let pledgers: Vec<soroban_sdk::Address> = env
         .storage()
         .persistent()
-        .get(&DataKey::Pledgers)
+        .get(&crate::DataKey::Pledgers)
         .unwrap_or_else(|| Vec::new(env));
 
     if pledgers.len() >= MAX_PLEDGERS {

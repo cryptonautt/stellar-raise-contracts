@@ -196,6 +196,15 @@ pub const MIN_DEADLINE_OFFSET: u64 = 60;
 /// Progress is capped at this value so callers always receive a value in
 /// `[0, MAX_PROGRESS_BPS]` regardless of how much the goal was exceeded.
 pub const MAX_PROGRESS_BPS: u32 = 10_000;
+/// # Security
+/// Ensures goal meets minimum threshold and creator is authenticated.
+pub fn create_campaign(env: Env, creator: Address, goal: u64) {
+    creator.require_auth();
+    if goal < MIN_CAMPAIGN_GOAL {
+        panic!("Goal too low");
+    }
+    env.events().publish(("campaign", "created"), (creator, goal));
+}
 
 // ── Validation helpers ───────────────────────────────────────────────────────
 /// Minimum seconds a deadline must be ahead of the current ledger timestamp.
@@ -313,6 +322,9 @@ pub fn validate_goal_amount(
 /// @return                   `Ok(())` if valid, `Err` otherwise.
 /// Validates that min_contribution meets the minimum floor.
 /// Returns Ok(()) if valid; Err(&'static str) otherwise.
+pub const MIN_CONTRIBUTION_AMOUNT: i128 = 1;
+pub const MIN_GOAL_AMOUNT: i128 = 100;
+
 #[inline]
 pub fn validate_min_contribution(min_contribution: i128) -> Result<(), &'static str> {
     if min_contribution < MIN_CONTRIBUTION_AMOUNT {

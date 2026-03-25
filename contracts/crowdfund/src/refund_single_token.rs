@@ -87,7 +87,7 @@ use soroban_sdk::{token, Address};
 //! 4. **Direction lock** — `refund_single_transfer` always transfers
 //!    `contract → contributor`; the direction cannot be reversed by a caller.
 
-#![allow(missing_docs)]
+#[allow(missing_docs)]
 
 use soroban_sdk::{token, Address, Env};
 use soroban_sdk::{token, Address, Env, Symbol};

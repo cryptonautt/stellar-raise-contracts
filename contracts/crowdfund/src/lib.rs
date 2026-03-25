@@ -141,11 +141,13 @@ mod soroban_sdk_minor_test;
 pub mod withdraw_event_emission;
 use withdraw_event_emission::{emit_withdrawal_event, mint_nfts_in_batch};
 
+#[cfg(test)]
 #[path = "stellar_token_minter_test.rs"]
 mod stellar_token_minter_test;
 mod soroban_sdk_minor_test;
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+mod stellar_token_minter_test_original;
 
 #[cfg(test)]
 mod test;
@@ -190,7 +192,8 @@ mod contract_state_size_test;
 #[cfg(test)]
 mod refund_single_token_test;
 #[cfg(test)]
-mod stellar_token_minter_test;
+#[path = "stellar_token_minter.test.rs"]
+mod stellar_token_minter_test_comprehensive;
 #[cfg(test)]
 mod soroban_sdk_minor_tests;
 #[cfg(test)]

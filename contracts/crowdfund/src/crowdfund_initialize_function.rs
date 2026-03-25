@@ -555,7 +555,7 @@ pub fn persist_initialize_state(
 //!   managed by `contribute()` and `add_roadmap_item()`.
 //! - The `initialized` event payload is bounded to scalar values only.
 
-#![allow(dead_code)]
+#[allow(dead_code)]
 
 use soroban_sdk::{Address, Env, String, Symbol, Vec};
 
