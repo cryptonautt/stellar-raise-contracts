@@ -1197,6 +1197,7 @@ impl CrowdfundContract {
         }
 
         if amount == 0 {
+            contribute_error_handling::log_contribute_error(&env, ContractError::ZeroAmount);
             return Err(ContractError::ZeroAmount);
         }
 
@@ -1206,12 +1207,14 @@ impl CrowdfundContract {
             .get(&DataKey::MinContribution)
             .unwrap();
         if amount < min_contribution {
+            contribute_error_handling::log_contribute_error(&env, ContractError::BelowMinimum);
             return Err(ContractError::BelowMinimum);
             return Err(ContractError::AmountTooLow);
         }
 
         let deadline: u64 = env.storage().instance().get(&DataKey::Deadline).unwrap();
         if env.ledger().timestamp() > deadline {
+            contribute_error_handling::log_contribute_error(&env, ContractError::CampaignEnded);
             return Err(ContractError::CampaignEnded);
         }
 
@@ -1266,7 +1269,10 @@ impl CrowdfundContract {
 
         let new_contribution = previous_amount
             .checked_add(amount)
-            .ok_or(ContractError::Overflow)?;
+            .ok_or_else(|| {
+                contribute_error_handling::log_contribute_error(&env, ContractError::Overflow);
+                ContractError::Overflow
+            })?;
 
         env.storage()
             .persistent()
@@ -1279,7 +1285,10 @@ impl CrowdfundContract {
         // Update the global total raised with overflow protection.
         let total: i128 = env.storage().instance().get(&DataKey::TotalRaised).unwrap();
 
-        let new_total = total.checked_add(amount).ok_or(ContractError::Overflow)?;
+        let new_total = total.checked_add(amount).ok_or_else(|| {
+            contribute_error_handling::log_contribute_error(&env, ContractError::Overflow);
+            ContractError::Overflow
+        })?;
 
         env.storage()
             .instance()
