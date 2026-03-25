@@ -96,6 +96,10 @@ pub mod campaign_goal_minimum;
 #[cfg(test)]
 #[path = "campaign_goal_minimum.test.rs"]
 mod campaign_goal_minimum_test;
+pub mod crowdfund_initialize_function;
+#[cfg(test)]
+#[path = "crowdfund_initialize_function.test.rs"]
+mod crowdfund_initialize_function_test;
 pub mod contribute_error_handling;
 #[cfg(test)]
 mod contribute_error_handling_tests;
@@ -789,6 +793,25 @@ impl CrowdfundContract {
         env.storage()
             .instance()
             .set(&DataKey::Roadmap, &empty_roadmap);
+        crate::crowdfund_initialize_function::validate_initialize_inputs(
+            goal,
+            min_contribution,
+            &platform_config,
+            bonus_goal,
+            &bonus_goal_description,
+        );
+        crate::crowdfund_initialize_function::persist_initialize_state(
+            &env,
+            &admin,
+            &creator,
+            &token,
+            goal,
+            deadline,
+            min_contribution,
+            &platform_config,
+            bonus_goal,
+            &bonus_goal_description,
+        );
 
         Ok(())
     }
