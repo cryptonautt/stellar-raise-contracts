@@ -127,6 +127,10 @@ pub mod soroban_sdk_minor;
 #[path = "soroban_sdk_minor.test.rs"]
 mod soroban_sdk_minor_test;
 #[cfg(test)]
+pub mod refund_single_token;
+use refund_single_token::{
+    execute_refund_single, refund_single_transfer, validate_refund_preconditions,
+};
 #[cfg(test)]
 #[path = "refund_single_token.test.rs"]
 mod refund_single_token_test;
@@ -161,6 +165,13 @@ mod crowdfund_initialize_function_test;
 
 #[cfg(test)]
 mod admin_upgrade_mechanism_test;
+pub mod soroban_sdk_minor;
+
+#[cfg(test)]
+mod auth_tests;
+pub mod campaign_goal_minimum;
+#[cfg(test)]
+mod campaign_goal_minimum_test;
 pub mod contribute_error_handling;
 #[cfg(test)]
 mod contribute_error_handling_tests;

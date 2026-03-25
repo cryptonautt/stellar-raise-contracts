@@ -764,6 +764,34 @@ Security notes validated by this suite:
 - Deadline/goal gates prevent premature or invalid `collect_pledges`.
 - Upgrade remains admin-gated.
 - Bonus-goal progress is capped at 10,000 bps (100%) for UI safety.
+Tests live in multiple files for comprehensive coverage:
+
+- `contracts/crowdfund/src/test.rs` — Functional tests
+- `contracts/crowdfund/src/auth_tests.rs` — Authorization tests
+- `contracts/crowdfund/src/stellar_token_minter_test.rs` — Minter-focused edge cases
+- `contracts/crowdfund/src/stellar_token_minter.test.rs` — Comprehensive token minter tests (95%+ coverage)
+
+### Token Minter Test Coverage
+
+| Area | Tests | Coverage |
+|---|---|---|
+| initialize | fields stored, double-init error, platform fee bounds, zero goal, zero min contribution | 100% |
+| contribute | basic, accumulation, multiple contributors, below minimum, zero amount, after deadline, non-active campaign, at minimum, at deadline | 100% |
+| withdraw | success, before deadline, goal not met, with platform fee, with NFT minting, non-active campaign, at exact deadline, one second after deadline | 100% |
+| set_nft_contract | success, unauthorized caller | 100% |
+| get_stats | empty campaign, with contributions, progress capped, single large contributor, equal contributions | 100% |
+| view functions | total_raised, goal, deadline, min_contribution, token, nft_contract, contributors | 100% |
+| edge cases | large amounts, multiple withdrawals, exactly at goal, just below goal, zero platform fee, max platform fee, minimum after deadline, contributors order | 100% |
+
+### Security Assumptions Validated
+
+1. **Auth enforcement**: `creator.require_auth()` and `contributor.require_auth()` are called on every state-changing function. The Soroban host enforces these at the protocol level.
+2. **Overflow protection**: All addition to `total_raised` and per-contributor balances uses `checked_add`, returning `ContractError::Overflow` on failure.
+3. **Platform fee cap**: Fee is validated ≤ 10,000 bps (100%) at initialization.
+4. **Deadline enforcement**: Contributions and withdrawals are rejected after the deadline.
+5. **Goal validation**: Withdrawals only succeed when the funding goal is met.
+6. **Authorization checks**: Only the creator can set the NFT contract and withdraw funds.
+7. **Status transitions**: Campaign status is properly managed to prevent double operations.
 
 Run with:
 

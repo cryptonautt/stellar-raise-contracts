@@ -609,6 +609,25 @@ impl core::fmt::Display for StateSizeError {
     }
 }
 
+impl core::fmt::Display for StateSizeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            StateSizeError::ContributorLimitExceeded => {
+                write!(f, "contributor limit exceeded")
+            }
+            StateSizeError::RoadmapLimitExceeded => {
+                write!(f, "roadmap limit exceeded")
+            }
+            StateSizeError::StretchGoalLimitExceeded => {
+                write!(f, "stretch goal limit exceeded")
+            }
+            StateSizeError::StringTooLong => {
+                write!(f, "string too long")
+            }
+        }
+    }
+}
+
 // ── Validation helpers ────────────────────────────────────────────────────────
 
 /// Validate title length.
@@ -1272,6 +1291,21 @@ pub fn validate_social_links(socials: &String) -> Result<(), StateSizeError> {
 pub fn validate_bonus_goal_description(description: &String) -> Result<(), StateSizeError> {
     if description.len() > MAX_BONUS_GOAL_DESCRIPTION_LENGTH {
         return Err(StateSizeError::StringTooLong);
+/// Validate bonus goal description length.
+///
+/// @param description The bonus goal description to validate.
+/// @return `Ok(())` when within limits, `Err(StateSizeError::StringTooLong)` otherwise.
+pub fn validate_bonus_goal_description(description: &String) -> Result<(), StateSizeError> {
+    check_string_len(description)
+}
+
+/// Validate contributor capacity.
+///
+/// @param current_count Current number of contributors.
+/// @return `Ok(())` when within limits, `Err(StateSizeError::ContributorLimitExceeded)` otherwise.
+pub fn validate_contributor_capacity(current_count: u32) -> Result<(), StateSizeError> {
+    if current_count >= MAX_CONTRIBUTORS {
+        return Err(StateSizeError::ContributorLimitExceeded);
     }
     Ok(())
 }
@@ -1281,6 +1315,13 @@ pub fn validate_bonus_goal_description(description: &String) -> Result<(), State
 pub fn validate_roadmap_description(description: &String) -> Result<(), StateSizeError> {
     if description.len() > MAX_ROADMAP_DESCRIPTION_LENGTH {
         return Err(StateSizeError::StringTooLong);
+/// Validate pledger capacity.
+///
+/// @param current_count Current number of pledgers.
+/// @return `Ok(())` when within limits, `Err(StateSizeError::ContributorLimitExceeded)` otherwise.
+pub fn validate_pledger_capacity(current_count: u32) -> Result<(), StateSizeError> {
+    if current_count >= MAX_CONTRIBUTORS {
+        return Err(StateSizeError::ContributorLimitExceeded);
     }
     Ok(())
 }
@@ -1290,6 +1331,18 @@ pub fn validate_roadmap_description(description: &String) -> Result<(), StateSiz
 pub fn validate_metadata_total_length(title_len: u32, desc_len: u32, social_len: u32) -> Result<(), StateSizeError> {
     let total = title_len.saturating_add(desc_len).saturating_add(social_len);
     if total > MAX_METADATA_TOTAL_LENGTH {
+///
+/// @param title_length Length of title string.
+/// @param description_length Length of description string.
+/// @param socials_length Length of socials string.
+/// @return `Ok(())` when within limits, `Err(StateSizeError::StringTooLong)` otherwise.
+pub fn validate_metadata_total_length(
+    title_length: u32,
+    description_length: u32,
+    socials_length: u32,
+) -> Result<(), StateSizeError> {
+    let total = title_length + description_length + socials_length;
+    if total > MAX_STRING_LEN * 3 {
         return Err(StateSizeError::StringTooLong);
     }
     Ok(())
@@ -1310,4 +1363,57 @@ pub fn validate_contributor_capacity(len: u32) -> bool { len < MAX_CONTRIBUTORS 
 pub fn validate_pledger_capacity(len: u32) -> bool { len < MAX_CONTRIBUTORS }
 pub fn validate_roadmap_capacity(len: u32) -> bool { len < 20 }
 pub fn validate_stretch_goal_capacity(len: u32) -> bool { len < 10 }
+
+/// Validate title length.
+///
+/// @param title The title to validate.
+/// @return `Ok(())` when within limits, `Err(StateSizeError::StringTooLong)` otherwise.
+pub fn validate_title(title: &String) -> Result<(), StateSizeError> {
+    check_string_len(title)
+}
+
+/// Validate description length.
+///
+/// @param description The description to validate.
+/// @return `Ok(())` when within limits, `Err(StateSizeError::StringTooLong)` otherwise.
+pub fn validate_description(description: &String) -> Result<(), StateSizeError> {
+    check_string_len(description)
+}
+
+/// Validate social links length.
+///
+/// @param socials The social links to validate.
+/// @return `Ok(())` when within limits, `Err(StateSizeError::StringTooLong)` otherwise.
+pub fn validate_social_links(socials: &String) -> Result<(), StateSizeError> {
+    check_string_len(socials)
+}
+
+/// Validate roadmap capacity.
+///
+/// @param current_count Current number of roadmap items.
+/// @return `Ok(())` when within limits, `Err(StateSizeError::RoadmapLimitExceeded)` otherwise.
+pub fn validate_roadmap_capacity(current_count: u32) -> Result<(), StateSizeError> {
+    if current_count >= MAX_ROADMAP_ITEMS {
+        return Err(StateSizeError::RoadmapLimitExceeded);
+    }
+    Ok(())
+}
+
+/// Validate roadmap description length.
+///
+/// @param description The roadmap description to validate.
+/// @return `Ok(())` when within limits, `Err(StateSizeError::StringTooLong)` otherwise.
+pub fn validate_roadmap_description(description: &String) -> Result<(), StateSizeError> {
+    check_string_len(description)
+}
+
+/// Validate stretch goal capacity.
+///
+/// @param current_count Current number of stretch goals.
+/// @return `Ok(())` when within limits, `Err(StateSizeError::StretchGoalLimitExceeded)` otherwise.
+pub fn validate_stretch_goal_capacity(current_count: u32) -> Result<(), StateSizeError> {
+    if current_count >= MAX_STRETCH_GOALS {
+        return Err(StateSizeError::StretchGoalLimitExceeded);
+    }
+    Ok(())
 }
