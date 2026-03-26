@@ -38,6 +38,19 @@ import React, { useState } from "react";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /**
+import React, { useState } from "react";
+
+/**
+ * @title React Submit Button States
+ * @notice Typed submit button with a strict state machine, safe label handling,
+ *         double-submit prevention, and ARIA accessibility semantics.
+ * @dev Labels are rendered as React text nodes — no dangerouslySetInnerHTML path.
+ *      Interaction is blocked while submitting to prevent duplicate blockchain transactions.
+ */
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+/**
  * @notice All supported visual/interaction states.
  * @dev Allowed transitions:
  *   idle        → submitting | disabled
