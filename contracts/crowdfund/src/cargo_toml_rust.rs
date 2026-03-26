@@ -96,7 +96,8 @@ pub struct ComplianceRule {
 //!
 //! ## Security Assumptions
 //!
-//! 1. **Patch-only bump** — All version changes follow semantic versioning
+//! 1. **Minor bump** — `soroban-sdk 22.1.0` is a minor release; storage layout
+//!    and host-function IDs remain backward-compatible within the 22.x series.
 //! 2. **Dev-only dependencies** — Development dependencies never affect WASM binary
 //! 3. **Security validation** — All dependencies must pass security checks
 //! 4. **Compliance enforcement** — CI/CD rules are automatically enforced
