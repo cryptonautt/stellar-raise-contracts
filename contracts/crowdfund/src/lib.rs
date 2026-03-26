@@ -890,6 +890,10 @@ impl CrowdfundContract {
     /// Delegates to [`admin_upgrade_mechanism::upgrade`]. See that module for
     /// full NatSpec documentation and security assumptions.
     pub fn upgrade(env: Env, new_wasm_hash: soroban_sdk::BytesN<32>) {
+        assert!(
+            admin_upgrade_mechanism::validate_wasm_hash(&new_wasm_hash),
+            "WASM hash must not be all-zero"
+        );
         let admin = admin_upgrade_mechanism::validate_admin_upgrade(&env);
         admin_upgrade_mechanism::perform_upgrade(&env, new_wasm_hash.clone());
 
