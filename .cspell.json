@@ -153,7 +153,16 @@
     "initialised",
     "CXXX",
     "Friendbot",
-    "repr"
+    "repr",
+    "oneline",
+    "minimising",
+    "uninit",
+    "underflows",
+    "Swatinem",
+    "recompiles",
+    "optimisation",
+    "optimised",
+    "Optimisation"
   ],
   "ignorePaths": [
     "node_modules/**",
