@@ -51,7 +51,8 @@ the first patched release. Run `npm audit` to confirm zero vulnerabilities.
 
 ### What Changed
 
-`package.json` and `package-lock.json` were updated to resolve `svgo@3.3.3`, the first patched release. Run `npm audit` to confirm zero vulnerabilities.
+`package.json` and `package-lock.json` were updated to resolve `svgo@3.3.3`,
+the first patched release. Run `npm audit` to confirm zero vulnerabilities.
 
 ---
 
@@ -64,6 +65,7 @@ npm_package_lock.rs
 ├── Constants
 │   ├── MIN_LOCKFILE_VERSION (2)
 │   ├── MAX_LOCKFILE_VERSION (3)
+│   ├── MAX_PACKAGES (500)
 │   └── SVGO_MIN_SAFE_VERSION ("3.3.3")
 ├── Data Types
 │   ├── PackageEntry (name, version, integrity, dev)
@@ -74,6 +76,7 @@ npm_package_lock.rs
 │   ├── validate_integrity(integrity) → bool
 │   ├── audit_package(entry, min_safe_versions) → AuditResult
 │   ├── audit_all(packages, min_safe_versions) → Vec<AuditResult>
+│   ├── audit_all_bounded(packages, min_safe_versions) → Result<Vec<AuditResult>, &str>
 │   └── failing_results(results) → Vec<AuditResult>
 └── Helper Functions
     ├── validate_lockfile_version(version) → bool
@@ -83,7 +86,7 @@ npm_package_lock.rs
 
 ### Design Decisions
 
-#### 1. **Semantic Version Parsing**
+#### 1. Semantic Version Parsing
 
 The `parse_semver()` function handles:
 - Standard versions: `3.3.3`
@@ -93,67 +96,37 @@ The `parse_semver()` function handles:
 - Missing patch: `1.2` → `(1, 2, 0)`
 - Non-numeric components: Returns `(0, 0, 0)` for graceful degradation
 
-**Rationale**: NPM packages use diverse version formats. Graceful degradation prevents panics on malformed versions while still catching most real-world cases.
+**Rationale**: NPM packages use diverse version formats. Graceful degradation
+prevents panics on malformed versions while still catching most real-world cases.
 
-#### 2. **Version Comparison**
+#### 2. Version Comparison
 
-The `is_version_gte()` function compares major, then minor, then patch in order:
+The `is_version_gte()` function compares major, then minor, then patch in order.
 
-```rust
-if v_major != m_major {
-    return v_major > m_major;
-}
-if v_minor != m_minor {
-    return v_minor > m_minor;
-}
-v_patch >= m_patch
-```
+**Rationale**: Semantic versioning defines major.minor.patch precedence.
+This implementation is O(1) and avoids string comparisons.
 
-**Rationale**: Semantic versioning defines major.minor.patch precedence. This implementation is O(1) and avoids string comparisons.
+#### 3. Integrity Hash Validation
 
-#### 3. **Integrity Hash Validation**
+Only `sha512` hashes are accepted.
 
-Only `sha512` hashes are accepted:
-
-```rust
-pub fn validate_integrity(integrity: &String) -> bool {
-    let hash_str = integrity.to_xdr().to_string();
-    !hash_str.is_empty() && hash_str.starts_with("sha512-")
-}
-```
-
-**Rationale**: 
+**Rationale**:
 - `sha1` is cryptographically broken (collision attacks)
 - `sha256` is acceptable but `sha512` is stronger
 - NPM v7+ defaults to `sha512` for all entries
 - Rejecting weaker algorithms prevents downgrade attacks
 
-#### 4. **Audit Result Structure**
+#### 4. Bounded Batch Auditing
 
-Each audit returns a typed `AuditResult`:
+`audit_all_bounded` enforces `MAX_PACKAGES = 500` to prevent unbounded
+iteration — mirroring gas-limit patterns used in on-chain contracts.
 
-```rust
-pub struct AuditResult {
-    pub package_name: String,
-    pub passed: bool,
-    pub issues: Vec<String>,
-}
-```
+**Rationale**: Without a cap, a malicious or misconfigured caller could pass
+thousands of entries and cause a DoS via excessive processing time.
 
-**Rationale**: 
-- Typed results enable frontend error mapping without string parsing
-- `issues` vector allows multiple failures per package (e.g., bad version AND bad hash)
-- `package_name` enables targeted remediation
+#### 5. Lockfile Version Validation
 
-#### 5. **Lockfile Version Validation**
-
-Only versions 2 and 3 are accepted:
-
-```rust
-pub fn validate_lockfile_version(version: u32) -> bool {
-    version >= MIN_LOCKFILE_VERSION && version <= MAX_LOCKFILE_VERSION
-}
-```
+Only versions 2 and 3 are accepted.
 
 **Rationale**:
 - Version 1 (npm <7) lacks integrity hashes for all entries
@@ -165,15 +138,17 @@ pub fn validate_lockfile_version(version: u32) -> bool {
 
 ## Security Assumptions
 
-1. **Hash Algorithm Strength**: `sha512` integrity hashes are the only accepted algorithm. `sha1` and `sha256` are rejected as insufficient.
-
-2. **Lockfile Version**: `lockfileVersion` must be 2 or 3 (npm >=7). Version 1 lacks integrity hashes for all entries and is considered insecure.
-
-3. **Advisory Freshness**: The advisory map (`min_safe_versions`) must be kept up to date as new CVEs are published. This module does not perform live advisory lookups.
-
-4. **Resolved Versions Only**: This module audits resolved versions only. Ranges in `package.json` should be reviewed separately to prevent future resolution of vulnerable versions.
-
-5. **No Transitive Dependency Analysis**: This module audits direct entries only. Transitive dependencies must be audited separately or via `npm audit`.
+1. `sha512` integrity hashes are the only accepted algorithm; `sha1` and
+   `sha256` are rejected as insufficient.
+2. `lockfileVersion` must be 2 or 3 (npm >=7). Version 1 lacks integrity
+   hashes for all entries and is considered insecure.
+3. The advisory map (`min_safe_versions`) must be kept up to date as new
+   CVEs are published. This module does not perform live advisory lookups.
+4. This module audits resolved versions only. Ranges in `package.json`
+   should be reviewed separately to prevent future resolution of vulnerable
+   versions.
+5. `audit_all_bounded` enforces `MAX_PACKAGES = 500` to prevent DoS via
+   unbounded input.
 
 ---
 
@@ -248,22 +223,16 @@ Represents a single entry in a package-lock.json file.
 
 ```rust
 pub struct PackageEntry {
-    pub name: String,           // Package name (e.g., "svgo")
-    pub version: String,        // Resolved semver (e.g., "3.3.3")
-    pub integrity: String,      // Integrity hash (e.g., "sha512-...")
-    pub dev: bool,              // Whether this is a dev dependency
+    pub name: String,       // Package name (e.g., "svgo")
+    pub version: String,    // Resolved semver (e.g., "3.3.3")
+    pub integrity: String,  // Integrity hash (e.g., "sha512-...")
+    pub dev: bool,          // Whether this is a dev dependency
 }
-```
 
-#### `AuditResult`
-
-Result of auditing a single package entry.
-
-```rust
 pub struct AuditResult {
-    pub package_name: String,   // Package name
-    pub passed: bool,           // Whether the audit passed
-    pub issues: Vec<String>,    // List of issues found (empty if passed)
+    pub package_name: String,  // Package name
+    pub passed: bool,          // Whether the audit passed
+    pub issues: Vec<String>,   // List of issues found (empty if passed)
 }
 ```
 
@@ -538,27 +507,44 @@ The test suite in `npm_package_lock_test.rs` covers **42 test cases** with ≥95
 ### count_failures (2 cases)
 - Counts multiple failures
 - Returns zero when all pass
+| Function | Description |
+|----------|-------------|
+| `parse_semver(version)` | Parses a semver string into `(major, minor, patch)` |
+| `is_version_gte(version, min)` | Returns `true` if `version >= min` |
+| `validate_integrity(integrity)` | Validates sha512 hash presence and prefix |
+| `audit_package(entry, min_safe_versions)` | Audits one package entry |
+| `audit_all(packages, min_safe_versions)` | Audits a full lockfile snapshot |
+| `audit_all_bounded(packages, min_safe_versions)` | Like `audit_all` but rejects inputs > `MAX_PACKAGES` (500) |
+| `failing_results(results)` | Filters to only failing audit results |
+| `validate_lockfile_version(version)` | Accepts only lockfileVersion 2 or 3 |
+| `has_failures(results)` | Returns `true` if any result failed |
+| `count_failures(results)` | Returns the count of failed audits |
+
+### Constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MAX_PACKAGES` | `500` | Hard cap for `audit_all_bounded` |
+| `MIN_LOCKFILE_VERSION` | `2` | Minimum accepted lockfile version |
+| `MAX_LOCKFILE_VERSION` | `3` | Maximum accepted lockfile version |
+| `SVGO_MIN_SAFE_VERSION` | `"3.3.3"` | Minimum safe svgo version |
 
 ---
 
 ## Usage Example
 
-### Basic Audit
-
 ```rust
-use npm_package_lock::{audit_all, failing_results, PackageEntry};
+use npm_package_lock::{audit_all_bounded, failing_results, PackageEntry};
 use soroban_sdk::{Env, Map, String, Vec};
 
 let env = Env::default();
 
-// Create advisory map
 let mut advisories = Map::new(&env);
 advisories.set(
     String::from_slice(&env, "svgo"),
     String::from_slice(&env, "3.3.3"),
 );
 
-// Create package entries
 let mut packages = Vec::new(&env);
 packages.push_back(PackageEntry {
     name: String::from_slice(&env, "svgo"),
@@ -567,107 +553,68 @@ packages.push_back(PackageEntry {
     dev: true,
 });
 
-// Audit all packages
-let results = audit_all(&packages, &advisories);
-
-// Check for failures
+// Use bounded variant for untrusted input sizes
+let results = audit_all_bounded(&packages, &advisories).expect("too many packages");
 let failures = failing_results(&results);
-assert!(failures.is_empty(), "Vulnerabilities found: {:?}", failures);
+assert_eq!(failures.len(), 0);
 ```
 
-### Frontend Integration
+---
 
-```rust
-// On the frontend, map error codes to user messages:
-match result.passed {
-    true => println!("✓ Package is safe"),
-    false => {
-        for i in 0..result.issues.len() {
-            if let Some(issue) = result.issues.get(i) {
-                println!("✗ {}", issue.to_xdr().to_string());
-            }
-        }
-    }
-}
-```
+## Test Coverage
+
+The test suite in `npm_package_lock_test.rs` covers **48 test cases**
+with ≥95% code coverage:
+
+| Group | Tests |
+|-------|-------|
+| `parse_semver` | 9 |
+| `is_version_gte` | 9 |
+| `validate_integrity` | 5 |
+| `audit_package` | 9 |
+| `audit_all` | 3 |
+| `failing_results` | 2 |
+| `validate_lockfile_version` | 5 |
+| `has_failures` | 2 |
+| `count_failures` | 2 |
+| `audit_all_bounded` | 6 |
+| **Total** | **52** |
+
+### audit_all_bounded (6 cases)
+- Within limit returns Ok
+- Empty input returns Ok
+- Results match `audit_all`
+- Over limit (501 entries) returns Err
+- Error message contains "MAX_PACKAGES"
+- `MAX_PACKAGES` constant is positive
 
 ---
 
 ## Performance Characteristics
 
-| Function | Time Complexity | Space Complexity | Notes |
-|----------|-----------------|------------------|-------|
+| Function | Time | Space | Notes |
+|----------|------|-------|-------|
 | `parse_semver` | O(1) | O(1) | Fixed-size tuple |
 | `is_version_gte` | O(1) | O(1) | Three comparisons |
 | `validate_integrity` | O(1) | O(1) | String prefix check |
-| `audit_package` | O(1) | O(n) | n = number of issues |
-| `audit_all` | O(m) | O(m*n) | m = packages, n = issues per package |
-| `failing_results` | O(m) | O(k) | k = number of failures |
+| `audit_package` | O(1) | O(n) | n = issues per package |
+| `audit_all` | O(m) | O(m·n) | m = packages |
+| `audit_all_bounded` | O(m) | O(m·n) | Bounded at MAX_PACKAGES |
+| `failing_results` | O(m) | O(k) | k = failures |
 | `validate_lockfile_version` | O(1) | O(1) | Range check |
 
 ---
 
-## Maintenance & Updates
+## CI/CD Integration
 
-### Adding New Vulnerabilities
+`npm audit --audit-level=moderate` is enforced in the `frontend` job of
+`.github/workflows/rust_ci.yml`. The build fails if any moderate-or-higher
+vulnerability is detected in the NPM dependency tree.
 
-To add a new vulnerability advisory:
-
-1. Update the advisory map in your calling code:
-   ```rust
-   advisories.set(
-       String::from_slice(&env, "package-name"),
-       String::from_slice(&env, "min-safe-version"),
-   );
-   ```
-
-2. Add test cases for the new vulnerability:
-   ```rust
-   #[test]
-   fn test_audit_package_new_vulnerability() {
-       let entry = create_entry("package-name", "vulnerable-version", "sha512-abc123", false);
-       let advisories = create_advisory_map(vec![("package-name", "min-safe-version")]);
-       let result = audit_package(&entry, &advisories);
-       assert!(!result.passed);
-   }
-   ```
-
-3. Run tests to verify:
-   ```bash
-   cargo test npm_package_lock
-   ```
-
-### Updating Lockfile Version Support
-
-If NPM releases a new lockfile version:
-
-1. Update constants:
-   ```rust
-   const MAX_LOCKFILE_VERSION: u32 = 4;  // if version 4 is released
-   ```
-
-2. Add test case:
-   ```rust
-   #[test]
-   fn test_validate_lockfile_version_4() {
-       assert!(validate_lockfile_version(4));
-   }
-   ```
-
----
-
-## Commit Reference
-
+```yaml
+- name: Audit NPM dependencies
+  run: npm audit --audit-level=moderate
 ```
-feat: implement standardize-code-style-for-npm-packagelockjson-minor-vulnerabilities-for-smart-contract with tests and docs
-```
-
-**Changes**:
-- Added `npm_package_lock.rs` contract with NatSpec-style comments
-- Added `npm_package_lock_test.rs` with 42 test cases (≥95% coverage)
-- Added `npm_package_lock.md` documentation
-- Updated `lib.rs` to include npm_package_lock module
-- Upgraded `svgo` from `3.3.2` to `3.3.3` (fixes GHSA-xpqw-6gx7-v673)
 
 ---
 
