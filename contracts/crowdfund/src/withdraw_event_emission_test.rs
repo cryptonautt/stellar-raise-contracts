@@ -25,6 +25,9 @@
 //! - Security: `emit_withdrawn` panics on zero/negative payout
 //! - `withdrawn` event payout reflects platform fee deduction
 //! - Double-withdraw is blocked (status guard)
+//! - Security: `emit_fee_transferred` panics on zero/negative fee
+//! - Security: `emit_nft_batch_minted` panics on zero count
+//! - Security: `emit_withdrawn` panics on zero/negative payout
 
 extern crate std;
 
@@ -46,6 +49,8 @@ use crate::{
 enum MockNftKey {
     token, Address, Env, String, TryFromVal,
     token, Address, Env, String, TryFromVal, Val,
+    testutils::{Address as _, Ledger},
+    token, Address, Env, TryFromVal, Val,
 };
 
 use crate::{
@@ -53,11 +58,11 @@ use crate::{
     CrowdfundContract, CrowdfundContractClient, PlatformConfig, MAX_NFT_MINT_BATCH,
 };
 
-// ── Minimal mock NFT contract ────────────────────────────────────────────────
+// ── Mock NFT contract ────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 #[contracttype]
-enum BoundedNftKey {
+enum MockNftKey {
     Count,
 }
 
@@ -71,6 +76,8 @@ struct BoundedMockNft;
 #[contractimpl]
 impl BoundedMockNft {
     pub fn mint(env: Env, _to: Address) -> u128 {
+impl MockNft {
+    pub fn mint(env: Env, _to: Address, _token_id: u64) {
         let n: u32 = env
             .storage()
             .instance()
@@ -83,6 +90,7 @@ impl BoundedMockNft {
             .instance()
             .set(&BoundedNftKey::Count, &(n + 1));
         n as u128
+        env.storage().instance().set(&MockNftKey::Count, &(n + 1));
     }
     pub fn count(env: Env) -> u32 {
         env.storage()
@@ -139,6 +147,7 @@ fn setup_with_nft(
         &(contributor_count as i128 * 100),
             &None,
         &(contributor_count as i128 * 100), // goal = exactly what contributors will raise
+        &goal,
         &deadline,
         &1,
         &None,
@@ -150,7 +159,7 @@ fn setup_with_nft(
         &None,
     );
 
-    let nft_id = env.register(BoundedMockNft, ());
+    let nft_id = env.register(MockNft, ());
     client.set_nft_contract(&creator, &nft_id);
 
     for _ in 0..contributor_count {
@@ -773,6 +782,11 @@ fn test_withdraw_no_batch_event_without_nft_contract() {
     (env, client, creator, token_addr, nft_id)
 }
 
+
+    (env, client, creator, token_addr, nft_id)
+}
+
+/// Set up a campaign without an NFT contract.
 fn setup_no_nft(
     contribution: i128,
 ) -> (Env, CrowdfundContractClient<'static>, Address, Address) {
@@ -861,7 +875,7 @@ fn test_withdraw_no_batch_event_without_nft_contract() {
     let sac = token::StellarAssetClient::new(&env, &token_addr);
 
     let creator = Address::generate(&env);
-    let deadline = env.ledger().timestamp() + 3600;
+    let deadline = env.ledger().timestamp() + 3_600;
 
     client.initialize(
         &creator,
@@ -879,9 +893,9 @@ fn test_withdraw_no_batch_event_without_nft_contract() {
         &None,
     );
 
-    let contributor = Address::generate(&env);
-    sac.mint(&contributor, &contribution);
-    client.contribute(&contributor, &contribution);
+    let c = Address::generate(&env);
+    sac.mint(&c, &contribution);
+    client.contribute(&c, &contribution);
 
     env.ledger().set_timestamp(deadline + 1);
     client.finalize();
@@ -891,21 +905,19 @@ fn test_withdraw_no_batch_event_without_nft_contract() {
 fn count_events_with_topic(env: &Env, t1: &str, t2: &str) -> usize {
     let s1 = String::from_str(env, t1);
     let s2 = String::from_str(env, t2);
+
+    (env, client, creator, token_addr)
+}
+
+/// Count events whose first two topics match the given string pair.
+fn count_events(env: &Env, t1: &str, t2: &str) -> usize {
     env.events()
         .all()
         .iter()
         .filter(|(_, topics, _)| {
-            if topics.len() < 2 {
-                return false;
-            }
-            let v1 = topics.get(0).unwrap();
-            let v2 = topics.get(1).unwrap();
-            String::try_from_val(env, &v1)
-                .map(|s| s == s1)
-                .unwrap_or(false)
-                && String::try_from_val(env, &v2)
-                    .map(|s| s == s2)
-                    .unwrap_or(false)
+            topics.len() >= 2
+                && topics.get(0).map(|v| v == soroban_sdk::Symbol::new(env, t1).into()).unwrap_or(false)
+                && topics.get(1).map(|v| v == soroban_sdk::Symbol::new(env, t2).into()).unwrap_or(false)
         })
         .count()
 }
@@ -913,26 +925,20 @@ fn count_events_with_topic(env: &Env, t1: &str, t2: &str) -> usize {
 fn first_event_data(env: &Env, t1: &str, t2: &str) -> Option<Val> {
     let s1 = String::from_str(env, t1);
     let s2 = String::from_str(env, t2);
+/// Return the data Val of the first matching event.
+fn event_data(env: &Env, t1: &str, t2: &str) -> Option<Val> {
     env.events()
         .all()
         .iter()
         .find(|(_, topics, _)| {
-            if topics.len() < 2 {
-                return false;
-            }
-            let v1 = topics.get(0).unwrap();
-            let v2 = topics.get(1).unwrap();
-            String::try_from_val(env, &v1)
-                .map(|s| s == s1)
-                .unwrap_or(false)
-                && String::try_from_val(env, &v2)
-                    .map(|s| s == s2)
-                    .unwrap_or(false)
+            topics.len() >= 2
+                && topics.get(0).map(|v| v == soroban_sdk::Symbol::new(env, t1).into()).unwrap_or(false)
+                && topics.get(1).map(|v| v == soroban_sdk::Symbol::new(env, t2).into()).unwrap_or(false)
         })
         .map(|(_, _, data)| data)
 }
 
-// ── NFT minting cap tests ────────────────────────────────────────────────────
+// ── NFT minting cap ───────────────────────────────────────────────────────────
 
 #[test]
 fn test_withdraw_mints_all_when_within_cap() {
@@ -943,6 +949,8 @@ fn test_withdraw_mints_all_when_within_cap() {
     client.withdraw();
     let nft = BoundedMockNftClient::new(&env, &nft_id);
     assert_eq!(nft.count(), count);
+    client.withdraw();
+    assert_eq!(MockNftClient::new(&env, &nft_id).count(), count);
 }
 
 #[test]
@@ -954,6 +962,10 @@ fn test_withdraw_caps_minting_at_max_batch() {
     client.withdraw();
     let nft = BoundedMockNftClient::new(&env, &nft_id);
     assert_eq!(nft.count(), MAX_NFT_MINT_BATCH);
+    let count = MAX_NFT_MINT_BATCH + 5;
+    let (env, client, _creator, _token, nft_id) = setup_with_nft(count);
+    client.withdraw();
+    assert_eq!(MockNftClient::new(&env, &nft_id).count(), MAX_NFT_MINT_BATCH);
 }
 
 #[test]
@@ -964,6 +976,8 @@ fn test_withdraw_mints_exactly_at_cap_boundary() {
     client.withdraw();
     let nft = BoundedMockNftClient::new(&env, &nft_id);
     assert_eq!(nft.count(), MAX_NFT_MINT_BATCH);
+    client.withdraw();
+    assert_eq!(MockNftClient::new(&env, &nft_id).count(), MAX_NFT_MINT_BATCH);
 }
 
 #[test]
@@ -972,9 +986,10 @@ fn test_withdraw_mints_single_contributor() {
     client.withdraw();
     let nft = BoundedMockNftClient::new(&env, &nft_id);
     assert_eq!(nft.count(), 1);
+    assert_eq!(MockNftClient::new(&env, &nft_id).count(), 1);
 }
 
-// ── nft_batch_minted event tests ─────────────────────────────────────────────
+// ── nft_batch_minted event ────────────────────────────────────────────────────
 
 #[test]
 fn test_withdraw_emits_single_batch_event() {
@@ -986,6 +1001,9 @@ fn test_withdraw_emits_single_batch_event() {
         count_events_with_topic(&env, "campaign", "nft_batch_minted"),
         1
     );
+    let (env, client, _creator, _token, _nft) = setup_with_nft(5);
+    client.withdraw();
+    assert_eq!(count_events(&env, "campaign", "nft_batch_minted"), 1);
 }
 
 #[test]
@@ -997,31 +1015,35 @@ fn test_withdraw_no_batch_event_without_nft_contract() {
         count_events_with_topic(&env, "campaign", "nft_batch_minted"),
         0
     );
+    assert_eq!(count_events(&env, "campaign", "nft_batch_minted"), 0);
 }
 
 #[test]
 fn test_withdraw_batch_event_data_equals_minted_count() {
     let count: u32 = 3;
-    let (env, client, _creator, _token, _nft_id) = setup_with_nft(count);
+    let (env, client, _creator, _token, _nft) = setup_with_nft(count);
     client.withdraw();
     let data = first_event_data(&env, "campaign", "nft_batch_minted")
         .expect("nft_batch_minted event not found");
     let minted: u32 = u32::try_from_val(&env, &data).expect("data is not u32");
+    let data = event_data(&env, "campaign", "nft_batch_minted").expect("event not found");
+    let minted: u32 = u32::try_from_val(&env, &data).expect("not u32");
     assert_eq!(minted, count);
 }
 
 #[test]
 fn test_withdraw_batch_event_data_capped_at_max() {
-    let count = MAX_NFT_MINT_BATCH + 5;
-    let (env, client, _creator, _token, _nft_id) = setup_with_nft(count);
+    let (env, client, _creator, _token, _nft) = setup_with_nft(MAX_NFT_MINT_BATCH + 5);
     client.withdraw();
     let data = first_event_data(&env, "campaign", "nft_batch_minted")
         .expect("nft_batch_minted event not found");
     let minted: u32 = u32::try_from_val(&env, &data).expect("data is not u32");
+    let data = event_data(&env, "campaign", "nft_batch_minted").expect("event not found");
+    let minted: u32 = u32::try_from_val(&env, &data).expect("not u32");
     assert_eq!(minted, MAX_NFT_MINT_BATCH);
 }
 
-// ── withdrawn event tests ────────────────────────────────────────────────────
+// ── withdrawn event ───────────────────────────────────────────────────────────
 
 #[test]
 fn test_withdraw_emits_withdrawn_event_once() {
@@ -1032,6 +1054,9 @@ fn test_withdraw_emits_withdrawn_event_once() {
 
     assert_eq!(count_events_with_topic(&env, "campaign", "funds_withdrawn"), 1);
     assert_eq!(count_events_with_topic(&env, "campaign", "withdrawn"), 1);
+    let (env, client, _creator, _token, _nft) = setup_with_nft(2);
+    client.withdraw();
+    assert_eq!(count_events(&env, "campaign", "withdrawn"), 1);
 }
 
 #[test]
@@ -1039,6 +1064,7 @@ fn test_withdraw_emits_withdrawn_event_without_nft() {
     let (env, client, _creator, _token) = setup_no_nft(1_000);
     client.withdraw();
     assert_eq!(count_events_with_topic(&env, "campaign", "withdrawn"), 1);
+    assert_eq!(count_events(&env, "campaign", "withdrawn"), 1);
 }
 
 #[test]
@@ -1056,6 +1082,13 @@ fn test_withdrawn_event_nft_count_zero_without_nft_contract() {
     assert_eq!(tuple.2, 0u32);
 }
 
+    let data = event_data(&env, "campaign", "withdrawn").expect("event not found");
+    let tuple: (Address, i128, u32) =
+        <(Address, i128, u32)>::try_from_val(&env, &data).expect("shape mismatch");
+    assert_eq!(tuple.2, 0u32);
+}
+
+/// `withdrawn` event payout equals total_raised when no platform fee.
 #[test]
 fn test_withdrawn_event_payout_equals_total_raised_no_fee() {
     let contribution: i128 = 5_000;
@@ -1069,10 +1102,14 @@ fn test_withdrawn_event_payout_equals_total_raised_no_fee() {
     assert_eq!(tuple.1, contribution, "payout should equal total raised");
     let tuple: (Address, i128, u32) =
         <(Address, i128, u32)>::try_from_val(&env, &data).expect("data shape mismatch");
+    let data = event_data(&env, "campaign", "withdrawn").expect("event not found");
+    let tuple: (Address, i128, u32) =
+        <(Address, i128, u32)>::try_from_val(&env, &data).expect("shape mismatch");
     assert_eq!(tuple.0, creator);
     assert_eq!(tuple.1, contribution);
 }
 
+/// `withdrawn` event payout equals total_raised minus platform fee.
 #[test]
 fn test_withdrawn_event_payout_reflects_fee_deduction() {
     let env = Env::default();
@@ -1088,7 +1125,7 @@ fn test_withdrawn_event_payout_reflects_fee_deduction() {
 
     let creator = Address::generate(&env);
     let platform_addr = Address::generate(&env);
-    let deadline = env.ledger().timestamp() + 3600;
+    let deadline = env.ledger().timestamp() + 3_600;
     let goal: i128 = 1_000_000;
 
     client.initialize(
@@ -1103,6 +1140,7 @@ fn test_withdrawn_event_payout_reflects_fee_deduction() {
         &None,
         &None,
         &None,
+        &Some(PlatformConfig { address: platform_addr, fee_bps: 500 }), // 5%
         &None,
         &None,
         &None,
@@ -1111,6 +1149,9 @@ fn test_withdrawn_event_payout_reflects_fee_deduction() {
     let contributor = Address::generate(&env);
     sac.mint(&contributor, &goal);
     client.contribute(&contributor, &goal);
+    let c = Address::generate(&env);
+    sac.mint(&c, &goal);
+    client.contribute(&c, &goal);
     env.ledger().set_timestamp(deadline + 1);
     client.finalize();
     client.withdraw();
@@ -1122,11 +1163,14 @@ fn test_withdrawn_event_payout_reflects_fee_deduction() {
 
     let tuple: (Address, i128, u32) =
         <(Address, i128, u32)>::try_from_val(&env, &data).expect("data shape mismatch");
+    let data = event_data(&env, "campaign", "withdrawn").expect("event not found");
+    let tuple: (Address, i128, u32) =
+        <(Address, i128, u32)>::try_from_val(&env, &data).expect("shape mismatch");
     // 5% of 1_000_000 = 50_000 fee; creator payout = 950_000
     assert_eq!(tuple.1, 950_000);
 }
 
-// ── fee_transferred event tests ──────────────────────────────────────────────
+// ── fee_transferred event ─────────────────────────────────────────────────────
 
 #[test]
 fn test_withdraw_emits_fee_transferred_event() {
@@ -1143,7 +1187,7 @@ fn test_withdraw_emits_fee_transferred_event() {
 
     let creator = Address::generate(&env);
     let platform_addr = Address::generate(&env);
-    let deadline = env.ledger().timestamp() + 3600;
+    let deadline = env.ledger().timestamp() + 3_600;
     let goal: i128 = 1_000_000;
 
     client.initialize(
@@ -1332,7 +1376,7 @@ fn test_fee_transferred_event_data_includes_fee_bps() {
         &goal,
         &deadline,
         &1,
-        &Some(config),
+        &Some(PlatformConfig { address: platform_addr, fee_bps: 200 }), // 2%
         &None,
         &None,
     );
@@ -1395,6 +1439,9 @@ fn test_fee_transferred_event_fee_bps_matches_config() {
     let contributor = Address::generate(&env);
     sac.mint(&contributor, &goal);
     client.contribute(&contributor, &goal);
+    let c = Address::generate(&env);
+    sac.mint(&c, &goal);
+    client.contribute(&c, &goal);
     env.ledger().set_timestamp(deadline + 1);
     client.withdraw();
 
@@ -1403,6 +1450,7 @@ fn test_fee_transferred_event_fee_bps_matches_config() {
     let tuple: (Address, i128, u32) =
         <(Address, i128, u32)>::try_from_val(&env, &data).expect("data shape mismatch");
     assert_eq!(tuple.2, fee_bps);
+    assert_eq!(count_events(&env, "campaign", "fee_transferred"), 1);
 }
 
 // ── Security: timestamp in withdrawn event ───────────────────────────────────
@@ -1456,6 +1504,25 @@ fn test_withdrawn_event_timestamp_changes_between_calls() {
 // ── Security: emit helper — fee_bps boundary ─────────────────────────────────
 
 /// `emit_fee_transferred` panics when fee_bps exceeds MAX_FEE_BPS.
+fn test_withdraw_no_fee_event_without_platform_config() {
+    let (env, client, _creator, _token) = setup_no_nft(1_000);
+    client.withdraw();
+    assert_eq!(count_events(&env, "campaign", "fee_transferred"), 0);
+}
+
+// ── Double-withdraw guard ─────────────────────────────────────────────────────
+
+/// Second withdraw() call panics because status is no longer Succeeded.
+#[test]
+#[should_panic]
+fn test_double_withdraw_panics() {
+    let (_, client, _creator, _token) = setup_no_nft(1_000);
+    client.withdraw();
+    client.withdraw(); // must panic
+}
+
+// ── Security unit tests for emit helpers ──────────────────────────────────────
+
 #[test]
 #[should_panic(expected = "fee_transferred: fee_bps exceeds MAX_FEE_BPS")]
 fn test_emit_fee_transferred_panics_on_fee_bps_above_max() {
@@ -1466,10 +1533,59 @@ fn test_emit_fee_transferred_panics_on_fee_bps_above_max() {
 }
 
 /// `emit_fee_transferred` accepts fee_bps == MAX_FEE_BPS (boundary).
+    emit_fee_transferred(&env, &Address::generate(&env), 0);
+}
+
 #[test]
 fn test_emit_fee_transferred_accepts_max_fee_bps_boundary() {
     use crate::withdraw_event_emission::MAX_FEE_BPS;
     let env = Env::default();
     let addr = Address::generate(&env);
     emit_fee_transferred(&env, &addr, 1_000, MAX_FEE_BPS);
+    emit_fee_transferred(&env, &Address::generate(&env), -1);
+}
+
+#[test]
+fn test_emit_fee_transferred_succeeds_with_positive_fee() {
+    let env = Env::default();
+    emit_fee_transferred(&env, &Address::generate(&env), 1);
+}
+
+#[test]
+#[should_panic(expected = "nft_batch_minted: minted_count must be positive")]
+fn test_emit_nft_batch_minted_panics_on_zero_count() {
+    let env = Env::default();
+    emit_nft_batch_minted(&env, 0);
+}
+
+#[test]
+fn test_emit_nft_batch_minted_succeeds_with_positive_count() {
+    let env = Env::default();
+    emit_nft_batch_minted(&env, 1);
+}
+
+#[test]
+#[should_panic(expected = "withdrawn: creator_payout must be positive")]
+fn test_emit_withdrawn_panics_on_zero_payout() {
+    let env = Env::default();
+    emit_withdrawn(&env, &Address::generate(&env), 0, 0);
+}
+
+#[test]
+#[should_panic(expected = "withdrawn: creator_payout must be positive")]
+fn test_emit_withdrawn_panics_on_negative_payout() {
+    let env = Env::default();
+    emit_withdrawn(&env, &Address::generate(&env), -100, 0);
+}
+
+#[test]
+fn test_emit_withdrawn_succeeds_with_valid_args() {
+    let env = Env::default();
+    emit_withdrawn(&env, &Address::generate(&env), 1_000, 5);
+}
+
+#[test]
+fn test_emit_withdrawn_allows_zero_nft_count() {
+    let env = Env::default();
+    emit_withdrawn(&env, &Address::generate(&env), 500, 0);
 }
