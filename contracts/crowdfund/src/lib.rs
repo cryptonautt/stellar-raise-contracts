@@ -140,6 +140,9 @@ mod soroban_sdk_minor_test;
 
 pub mod withdraw_event_emission;
 use withdraw_event_emission::{emit_withdrawal_event, mint_nfts_in_batch};
+use withdraw_event_emission::{emit_fee_transferred, emit_withdrawn, mint_nfts_in_batch};
+#[cfg(test)]
+mod withdraw_event_emission_test;
 
 #[cfg(test)]
 #[path = "stellar_token_minter_test.rs"]
@@ -2215,6 +2218,11 @@ impl CrowdfundContract {
             ("campaign", "funds_withdrawn"),
             (creator.clone(), creator_payout, nft_minted_count),
         );
+        let nft_contract: Option<Address> = env.storage().instance().get(&DataKey::NFTContract);
+        let nft_minted_count = mint_nfts_in_batch(&env, &nft_contract);
+
+        // Single withdrawal event carrying payout and mint count.
+        emit_withdrawn(&env, &creator, creator_payout, nft_minted_count);
 
         Ok(())
     }
@@ -2449,9 +2457,6 @@ impl CrowdfundContract {
     ///
     /// Each contributor independently claims their own refund after the campaign
     /// deadline has passed and the goal was not met.
-    ///
-    /// # Arguments
-    /// * `contributor` – The address claiming the refund. Must match the caller.
     ///
     /// # Errors
     /// * [`ContractError::CampaignStillActive`] – Deadline has not yet passed.
