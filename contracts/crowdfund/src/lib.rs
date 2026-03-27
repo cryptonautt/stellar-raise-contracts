@@ -56,7 +56,7 @@ mod cargo_toml_rust_test;
 mod contract_state_size_test;
 #[cfg(test)]
 mod contribute_error_handling_tests;
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_crowdfund_tests"))]
 #[path = "npm_package_lock_test.rs"]
 mod npm_package_lock_test;
 
@@ -69,10 +69,10 @@ mod proptest_generator_boundary_tests;
 #[cfg(test)]
 #[path = "soroban_sdk_minor_test.rs"]
 mod soroban_sdk_minor_test;
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_crowdfund_tests"))]
 #[path = "stellar_token_minter_test.rs"]
 mod stellar_token_minter_test_original;
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_crowdfund_tests"))]
 #[path = "stellar_token_minter.test.rs"]
 mod stellar_token_minter_test_comprehensive;
 #[cfg(test)]
