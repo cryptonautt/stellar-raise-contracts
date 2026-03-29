@@ -33,6 +33,7 @@ pub mod security_compliance_automation;
 pub mod security_analytics;
 pub mod conditional_optimization;
 pub mod batch_processing_optimization;
+pub mod gas_optimization_algorithms;
 
 pub mod parallel
 
@@ -116,6 +117,9 @@ mod security_analytics_test;
 mod conditional_optimization_test;
 #[path = "batch_processing_optimization.test.rs"]
 mod batch_processing_optimization_test;
+#[cfg(test)]
+#[path = "gas_optimization_algorithms.test.rs"]
+mod gas_optimization_algorithms_test;
 
 // --- Constants ---
 const CONTRACT_VERSION: u32 = 3;
