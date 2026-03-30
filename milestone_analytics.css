@@ -1,0 +1,212 @@
+/*
+ * Milestone Celebration Analytics - Premium Styles
+ * Design: High-fidelity, vibrant, and interactive
+ */
+
+ @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+ :root {
+   --color-accent-primary: #3b82f6;
+   --color-accent-secondary: #8b5cf6;
+   --color-success: #10b981;
+   --color-warning: #f59e0b;
+   --color-danger: #ef4444;
+   --color-surface-900: #111827;
+   --color-surface-800: #1f2937;
+   --color-surface-700: #374151;
+   --color-text-primary: #f9fafb;
+   --color-text-secondary: #9ca3af;
+   --glass-bg: rgba(31, 41, 55, 0.4);
+   --glass-border: rgba(255, 255, 255, 0.1);
+ }
+ 
+ .milestone-analytics-panel {
+   font-family: 'Inter', system-ui, -apple-system, sans-serif;
+   background: var(--color-surface-900);
+   color: var(--color-text-primary);
+   padding: 2rem;
+   border-radius: 1.5rem;
+   max-width: 600px;
+   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+   border: 1px solid var(--glass-border);
+   backdrop-filter: blur(8px);
+   margin: 1rem auto;
+ }
+ 
+ .milestone-analytics-panel__header {
+   display: flex;
+   justify-content: space-between;
+   align-items: center;
+   margin-bottom: 2rem;
+ }
+ 
+ .milestone-analytics-panel__title {
+   font-size: 1.5rem;
+   font-weight: 700;
+   background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
+   -webkit-background-clip: text;
+   -webkit-text-fill-color: transparent;
+   margin: 0;
+ }
+ 
+ .milestone-analytics-panel__badge {
+   padding: 0.25rem 0.75rem;
+   border-radius: 2rem;
+   font-size: 0.75rem;
+   font-weight: 600;
+   color: white;
+   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+   transition: transform 0.2s ease;
+ }
+ 
+ .milestone-analytics-panel__badge:hover {
+   transform: scale(1.05);
+ }
+ 
+ .milestone-analytics-panel__grid {
+   display: grid;
+   grid-template-columns: repeat(2, 1fr);
+   gap: 1rem;
+   margin-bottom: 2rem;
+ }
+ 
+ .bi-card {
+   background: var(--glass-bg);
+   border: 1px solid var(--glass-border);
+   padding: 1rem;
+   border-radius: 1rem;
+   display: flex;
+   flex-direction: column;
+   gap: 0.5rem;
+   transition: all 0.2s ease;
+ }
+ 
+ .bi-card:hover {
+   border-color: var(--color-accent-primary);
+   background: rgba(59, 130, 246, 0.05);
+   transform: translateY(-2px);
+ }
+ 
+ .bi-card__label {
+   color: var(--color-text-secondary);
+   font-size: 0.75rem;
+   text-transform: uppercase;
+   letter-spacing: 0.05em;
+ }
+ 
+ .bi-card__value {
+   font-size: 1.25rem;
+   font-weight: 600;
+ }
+ 
+ .bi-card__value--high { color: var(--color-success); }
+ .bi-card__value--medium { color: var(--color-warning); }
+ .bi-card__value--low { color: var(--color-danger); }
+ 
+ .milestone-analytics-panel__progress-container {
+   margin-bottom: 2rem;
+ }
+ 
+ .progress-info {
+   display: flex;
+   justify-content: space-between;
+   font-size: 0.875rem;
+   margin-bottom: 0.5rem;
+   color: var(--color-text-secondary);
+ }
+ 
+ .progress-bar {
+   height: 0.75rem;
+   background: var(--color-surface-800);
+   border-radius: 1rem;
+   overflow: hidden;
+   border: 1px solid var(--glass-border);
+ }
+ 
+ .progress-bar__fill {
+   height: 100%;
+   background: linear-gradient(90deg, var(--color-accent-primary), var(--color-accent-secondary));
+   box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+   border-radius: 1rem;
+   transition: width 1s cubic-bezier(0.16, 1, 0.3, 1);
+ }
+ 
+ .milestone-analytics-panel__insights {
+   border-top: 1px solid var(--color-surface-700);
+   padding-top: 1.5rem;
+ }
+ 
+ .section-title {
+   font-size: 1.125rem;
+   font-weight: 600;
+   margin-bottom: 1rem;
+   color: var(--color-text-secondary);
+ }
+ 
+ .insight-list {
+   list-style: none;
+   padding: 0;
+   margin: 0;
+   display: flex;
+   flex-direction: column;
+   gap: 1rem;
+ }
+ 
+ .insight-item {
+   background: var(--color-surface-800);
+   padding: 1rem;
+   border-radius: 0.75rem;
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   border: 1px solid transparent;
+   transition: border-color 0.2s ease;
+ }
+ 
+ .insight-item:hover {
+   border-color: var(--glass-border);
+ }
+ 
+ .insight-item--success { border-left: 4px solid var(--color-success); }
+ .insight-item--info { border-left: 4px solid var(--color-accent-primary); }
+ .insight-item--warning { border-left: 4px solid var(--color-warning); }
+ 
+ .insight-item__content strong {
+   display: block;
+   font-size: 0.875rem;
+   margin-bottom: 0.25rem;
+ }
+ 
+ .insight-item__content p {
+   margin: 0;
+   font-size: 0.8125rem;
+   color: var(--color-text-secondary);
+   line-height: 1.4;
+ }
+ 
+ .trend-icon {
+   width: 2rem;
+   height: 2rem;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   border-radius: 50%;
+   font-size: 0.75rem;
+   background: var(--color-surface-900);
+ }
+ 
+ .trend-icon--up { color: var(--color-success); }
+ .trend-icon--down { color: var(--color-danger); }
+ .trend-icon--neutral { color: var(--color-text-secondary); }
+ 
+ @media (max-width: 480px) {
+   .milestone-analytics-panel__grid {
+     grid-template-columns: 1fr;
+   }
+ }
+ 
+ @media (prefers-reduced-motion: reduce) {
+   .progress-bar__fill {
+     transition: none;
+   }
+ }
